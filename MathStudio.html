@@ -1,0 +1,2247 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MathStudio</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
+
+
+
+const FONTS=[
+  {id:"stix",n:"STIX Two Text",f:"'STIX Two Text',serif"},
+  {id:"times",n:"Times New Roman",f:"'Times New Roman',serif"},
+  {id:"cambria",n:"Cambria",f:"Cambria,Georgia,serif"},
+  {id:"lora",n:"Lora",f:"'Lora',serif"},
+  {id:"merri",n:"Merriweather",f:"'Merriweather',serif"},
+  {id:"source",n:"Source Serif",f:"'Source Serif 4',serif"},
+  {id:"noto",n:"Noto Serif",f:"'Noto Serif',serif"},
+  {id:"garamond",n:"EB Garamond",f:"'EB Garamond',serif"},
+  {id:"crimson",n:"Crimson Pro",f:"'Crimson Pro',serif"},
+  {id:"libre",n:"Libre Baskerville",f:"'Libre Baskerville',serif"},
+];
+const GF="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=STIX+Two+Text:wght@400;700&family=Lora:wght@400;700&family=Merriweather:wght@400;700&family=Source+Serif+4:wght@400;700&family=Noto+Serif:wght@400;700&family=EB+Garamond:wght@400;700&family=Crimson+Pro:wght@400;700&family=Libre+Baskerville:wght@400;700&display=swap";
+
+
+let GEMINI_KEY="";
+try{GEMINI_KEY=localStorage.getItem("ms_api_key")||"";}catch(e){}
+
+async function callAI(content){
+  if(!GEMINI_KEY)throw new Error("API key girilmedi! Sağ üstteki 🔑 butonuna basıp key girin.");
+  const parts=[];
+  for(const c of content){
+    if(c.type==="text") parts.push({text:c.text});
+    else if(c.type==="image") parts.push({inlineData:{mimeType:c.source.media_type,data:c.source.data}});
+  }
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({contents:[{parts}]})
+  });
+  if(!r.ok){
+    if(r.status===429)throw new Error("API limiti doldu. Birkaç dakika bekleyip tekrar deneyin.");
+    if(r.status===403)throw new Error("API key geçersiz veya yetkisiz. Yeni key alıp 🔑 butonundan girin.");
+    if(r.status===404)throw new Error("Model bulunamadı. Sayfayı yenileyin (Ctrl+F5).");
+    if(r.status===400){
+      let det="";try{const ed=await r.json();det=ed?.error?.message||"";}catch(e){}
+      throw new Error("İstek hatası: "+(det||"API key geçersiz olabilir, 🔑 butonundan kontrol edin."));
+    }
+    throw new Error("Bağlantı hatası ("+r.status+")");
+  }
+  const d=await r.json();
+  if(d.error)throw new Error(d.error.message);
+  return d.candidates?.[0]?.content?.parts?.map(p=>p.text).join("")||"";
+}
+function parseJ(r){
+  let s=r.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
+  const i=s.indexOf("{");if(i<0)throw new Error("JSON yok");
+  s=s.slice(i);
+  // Kesik JSON düzeltme — eksik kapanış ekle
+  try{return JSON.parse(s);}catch(e){
+    // Kesik string'i kapat
+    let f=s;
+    // Açık string varsa kapat
+    const lastQuote=f.lastIndexOf('"');
+    const beforeQuote=f.substring(0,lastQuote);
+    const openQuotes=(beforeQuote.match(/(?<!\\)"/g)||[]).length;
+    if(openQuotes%2!==0)f=f.substring(0,lastQuote)+'"';
+    // Son virgülü temizle
+    f=f.replace(/,\s*$/,'');
+    // Eksik kapanışları ekle
+    if(!f.includes(']'))f+='"]';
+    if(!f.endsWith('}'))f+='}';
+    try{return JSON.parse(f);}catch(e2){
+      // Son çare — questions dizisini manuel çıkar
+      const matches=[...s.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(m=>m[1].replace(/\\"/g,'"').replace(/\\\\/g,'\\'));
+      if(matches.length>1)return{questions:matches.slice(1)};
+      throw e;
+    }
+  }
+}
+
+const PROMPT_FORMULA=`Resimdeki el yazısı matematiksel ifadeyi BİREBİR bilgisayar yazısına çevir.
+KRİTİK: Gördüğünü AYNEN yaz. SADELEŞTİRME, YORUMLAMA, DEĞİŞTİRME. Resimde ne varsa o.
+
+HTML etiketleri:
+KESİR: <span class="mf"><span class="mfn">pay</span><span class="mfd">payda</span></span>
+LİMİT: <span class="ml"><span class="mlt">lim</span><span class="mlb">x→a</span></span>
+İNTEGRAL: <span class="mi"><span class="miu">üst</span><span class="mis">∫</span><span class="mil">alt</span></span>
+TOPLAM: <span class="ms"><span class="msu">n</span><span class="mss">Σ</span><span class="msl">k=1</span></span>
+KAREKÖK: <span class="mr"><span class="mrs">√</span><span class="mrc">ifade</span></span>
+KÜP KÖK: <span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
+n. KÖK: <span class="mr"><sup>n</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
+ÜSLÜ: x<sup>2</sup>  ALT: a<sub>1</sub>
+PARÇALI: <span class="mp"><span class="mpb">{</span><span class="mpc"><span class="mpl">ifade1 , koşul1</span><span class="mpl">ifade2 , koşul2</span></span></span>
+MATRİS: <span class="mmx"><span class="mmxb">[</span><span class="mmxg"><span class="mmxr"><span class="mmxc">a</span><span class="mmxc">b</span></span><span class="mmxr"><span class="mmxc">c</span><span class="mmxc">d</span></span></span><span class="mmxb">]</span></span>
+
+ÖNEMLİ: Üs kısmı kesir ise kesir olarak yaz!
+Örnek: 2^(1/x) → 2<sup><span class="mf"><span class="mfn">1</span><span class="mfd">x</span></span></sup>
+Örnek: x^(2/3) → x<sup><span class="mf"><span class="mfn">2</span><span class="mfd">3</span></span></sup>
+Örnek: e^(-x²) → e<sup>−x²</sup>
+Örnek: a^(n+1) → a<sup>n+1</sup>
+
+Semboller: π θ α β γ δ ε ∞ ± × ÷ ≤ ≥ ≠ → Unicode kullan.
+
+text alanına HTML etiketli metin yaz. latex alanına LaTeX yaz.
+JSON: {"results":[{"text":"HTML metin","latex":"LaTeX"}]} Backtick KULLANMA.`;
+
+/* ÖNEMLİ: AI'dan HTML döndürmesini istiyoruz */
+const PROMPT_SCAN=`Resimdeki matematik sorularını BİREBİR bilgisayar yazısına çevir.
+Matematiksel ifadeleri KİTAPTAKİ GİBİ göstermek için HTML etiketleri kullan:
+
+KESİR (pay üstte çizgi altta payda):
+<span class="mf"><span class="mfn">pay</span><span class="mfd">payda</span></span>
+Örnek: <span class="mf"><span class="mfn">x²−9</span><span class="mfd">x−3</span></span>
+
+LİMİT (lim yazısının ALTINDA x→a):
+<span class="ml"><span class="mlt">lim</span><span class="mlb">x→3</span></span>
+Örnek: <span class="ml"><span class="mlt">lim</span><span class="mlb">x→∞</span></span> <span class="mf"><span class="mfn">1</span><span class="mfd">x</span></span> = 0
+
+İNTEGRAL (∫ sembolünün ALTINDA alt sınır ÜSTÜNDE üst sınır):
+<span class="mi"><span class="miu">üst</span><span class="mis">∫</span><span class="mil">alt</span></span>
+Örnek: <span class="mi"><span class="miu">1</span><span class="mis">∫</span><span class="mil">0</span></span> x² dx
+
+TOPLAM (Σ altında ve üstünde):
+<span class="ms"><span class="msu">n</span><span class="mss">Σ</span><span class="msl">k=1</span></span>
+
+KAREKÖK (√ işareti + üstten çizgi):
+<span class="mr"><span class="mrs">√</span><span class="mrc">ifade</span></span>
+Örnek: <span class="mr"><span class="mrs">√</span><span class="mrc">x²+1</span></span>
+
+KÜP KÖK (³√):
+<span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
+Örnek: <span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">27</span></span>
+
+n. DERECEDEN KÖK (ⁿ√):
+<span class="mr"><sup>n</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
+
+ÜSLÜ: x<sup>2</sup>, x<sup>n+1</sup>, e<sup>−x</sup>
+ALT SİMGE: a<sub>1</sub>, a<sub>n</sub>, x<sub>0</sub>
+PARÇALI: <span class="mp"><span class="mpb">{</span><span class="mpc"><span class="mpl">ifade , koşul</span></span></span>
+MATRİS: <span class="mmx"><span class="mmxb">[</span><span class="mmxg"><span class="mmxr"><span class="mmxc">a</span><span class="mmxc">b</span></span></span><span class="mmxb">]</span></span>
+
+DİĞER: π θ α β γ δ ε ∞ ± × ÷ ≤ ≥ ≠ ≈ → ⇒ ∈ ° ∠ ∥ ⊥ doğrudan Unicode kullan.
+
+ÖNEMLİ KURALLAR:
+- Soruyu OLDUĞU GİBİ, eksiksiz yaz
+- Soru numarası EKLEME  
+- Alt şıkları (a,b,c) varsa dahil et
+- Şekil varsa [Şekil: açıklama] yaz
+- Düz metin kısımlarını HTML etiketi OLMADAN yaz
+- Sadece matematiksel ifadelerde HTML etiket kullan
+
+JSON: {"questions":["soru1 html","soru2 html",...]}
+Backtick veya markdown KULLANMA. Sadece JSON.`;
+
+const PROMPT_BOOK=`Resimdeki el yazısı matematik konu anlatımını profesyonel DERS KİTABI formatında düzenle.
+
+MATEMATİK İFADELER İÇİN HTML ETİKETLERİ:
+KESİR: <span class="mf"><span class="mfn">pay</span><span class="mfd">payda</span></span>
+LİMİT: <span class="ml"><span class="mlt">lim</span><span class="mlb">x→a</span></span>
+İNTEGRAL: <span class="mi"><span class="miu">üst</span><span class="mis">∫</span><span class="mil">alt</span></span>
+TOPLAM: <span class="ms"><span class="msu">n</span><span class="mss">Σ</span><span class="msl">k=1</span></span>
+KAREKÖK: <span class="mr"><span class="mrs">√</span><span class="mrc">ifade</span></span>
+ÜSLÜ: x<sup>2</sup>  ALT SİMGE: a<sub>1</sub>
+Unicode: π θ α β γ δ ε ∞ ± × ÷ ≤ ≥ ≠ ≈ → ⇒ ∈ ° ∠ ∥ ⊥
+
+SAYFA DÜZENLEME KURALLARI:
+
+1. ANA BAŞLIK: <div class="bk-title">BAŞLIK</div>
+2. ALT BAŞLIK: <div class="bk-sub">Alt Başlık</div>
+3. ÖRNEK başlığı: <div class="bk-ex-head">ÖRNEK 1</div>
+4. ÇÖZÜM başlığı: <div class="bk-sol-head">ÇÖZÜM</div>
+5. ÖNEMLİ FORMÜL (ortalanmış vurgulu): <div class="bk-formula">formül</div>
+6. Normal açıklama: düz metin yaz, HTML etiketi gerekmez
+7. Önemli kelimeler: <b>kelime</b> ile kalın yap
+
+ÖNEMLİ:
+- Kutu, çerçeve, renklendirme YAPMA — kullanıcı kendisi ekleyecek
+- Sadece başlık yapısı ve metin düzeni yap
+- Örneklerin başına ÖRNEK 1, ÖRNEK 2 yaz
+- Çözüm varsa başına ÇÖZÜM yaz
+- Tanım/teorem/dikkat kutusu EKLEME — düz metin olarak yaz
+- Her bölümü AYRI bir questions elemanı olarak döndür
+- İçeriği OLDUĞU GİBİ aktar, kendi bilgini EKLEME
+- Şekil/grafik varsa [Şekil: açıklama] yaz
+
+JSON: {"questions":["bölüm1 html","bölüm2 html",...]}
+Backtick veya markdown KULLANMA. Sadece JSON.`;
+
+/* ═══ COMPONENTS ═══ */
+function FontPick({v,set}){
+  const[o,setO]=useState(false);const r=useRef();const s=FONTS.find(f=>f.id===v)||FONTS[0];
+  useEffect(()=>{const h=e=>{if(r.current&&!r.current.contains(e.target))setO(false)};document.addEventListener("mousedown",h);return()=>document.removeEventListener("mousedown",h)},[]);
+  return(<div className="fp" ref={r}>
+    <button className="fp-b" onClick={()=>setO(!o)}><span className="fp-i">Aa</span><span className="fp-n">{s.n}</span></button>
+    {o&&<div className="fp-d">{FONTS.map(f=><button key={f.id} className={`fp-o${f.id===v?" on":""}`} onClick={()=>{set(f.id);setO(false)}}><span style={{fontFamily:f.f,fontSize:14}}>{f.n}</span>{f.id===v&&<b style={{color:"#1b2a4a"}}>✓</b>}</button>)}</div>}
+  </div>);
+}
+
+function Canvas({onDone,busy,onAddAsImage}){
+  const ref=useRef();const drawing=useRef(false);const startPt=useRef(null);const pathPts=useRef([]);const snapshot=useRef(null);const lastPt=useRef(null);
+  const[tool,setTool]=useState("pen");const[sz,setSz]=useState(2.5);const[clr,setClr]=useState("#111");const[dirty,setDirty]=useState(false);
+  const[gridOpt,setGridOpt]=useState({grid:true,nums:true});
+  const[undoStack,setUndoStack]=useState([]);
+  const[cvH,setCvH]=useState(300); // canvas yüksekliği
+  const[rightAngle,setRightAngle]=useState(0);
+  const[arcShowDeg,setArcShowDeg]=useState(true);
+  const[tickStyle,setTickStyle]=useState(0);
+  const[txtSize,setTxtSize]=useState(14);
+  const[curvePhase,setCurvePhase]=useState(0); // 0=başlangıç, 1=uçlar belirlendi kontrol noktası seç
+  const curveEnds=useRef(null); // {x1,y1,x2,y2}
+  const curveSnap=useRef(null);
+  const[polyPts,setPolyPts]=useState([]);const polySnap=useRef(null);
+  const[selRect,setSelRect]=useState(null); // {x,y,w,h} seçim alanı
+  const[selData,setSelData]=useState(null); // seçilen pikseller
+  const[selDrag,setSelDrag]=useState(false); // sürükleniyor mu
+  const selSnap=useRef(null);
+  const rightCycle=useRef({x:0,y:0,idx:0}); // aynı noktada döngü
+  const[txtMode,setTxtMode]=useState(false);const[txtVal,setTxtVal]=useState("");const[txtPos,setTxtPos]=useState(null);const txtRef=useRef();
+  const[labels,setLabels]=useState([]); // [{id,text,x,y,color,size}]
+  const[dragLabel,setDragLabel]=useState(null);const dragOff=useRef(null);
+
+  const init=useCallback(()=>{const c=ref.current;if(!c)return;const p=window.devicePixelRatio||2;c.width=c.offsetWidth*p;c.height=c.offsetHeight*p;const x=c.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c.offsetWidth,c.offsetHeight);x.lineCap="round";x.lineJoin="round";setDirty(false);setUndoStack([]);setLabels([]);},[]);
+  useEffect(()=>{init();},[init]);
+  // Ctrl+Z geri al kısayolu
+  useEffect(()=>{
+    const handleKey=(e)=>{if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();undo();}};
+    window.addEventListener("keydown",handleKey);
+    return()=>window.removeEventListener("keydown",handleKey);
+  });
+  const gp=e=>{const r=ref.current.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return[t.clientX-r.left,t.clientY-r.top];};
+  const saveSnap=()=>{const c=ref.current;snapshot.current=c.getContext("2d").getImageData(0,0,c.width,c.height);};
+  const restoreSnap=()=>{if(snapshot.current)ref.current.getContext("2d").putImageData(snapshot.current,0,0);};
+  const pushUndo=()=>{const c=ref.current;setUndoStack(s=>[...s.slice(-30),c.getContext("2d").getImageData(0,0,c.width,c.height)]);};
+  const undo=()=>{if(!undoStack.length)return;const last=undoStack[undoStack.length-1];ref.current.getContext("2d").putImageData(last,0,0);setUndoStack(s=>s.slice(0,-1));};
+
+  // Metin aracı — etiket oluştur (sürüklenebilir)
+  const commitText=()=>{
+    if(!txtVal.trim()||!txtPos)return;
+    setLabels(ls=>[...ls,{id:Date.now(),text:txtVal,x:txtPos[0],y:txtPos[1],color:clr,size:txtSize}]);
+    setTxtMode(false);setTxtVal("");setTxtPos(null);setDirty(true);
+  };
+
+  // Etiketleri canvas'a çiz (export öncesi)
+  const bakeLabels=()=>{
+    const ctx=ref.current.getContext("2d");
+    labels.forEach(lb=>{
+      ctx.fillStyle=lb.color;ctx.font=`bold ${lb.size}px 'DM Sans',sans-serif`;
+      ctx.textAlign="left";ctx.textBaseline="middle";
+      ctx.fillText(lb.text,lb.x,lb.y);
+    });
+  };
+
+  // Etiket sürükleme
+  const onLabelDown=(e,id)=>{
+    e.stopPropagation();
+    const rect=ref.current.getBoundingClientRect();
+    const lb=labels.find(l=>l.id===id);if(!lb)return;
+    const cx=e.clientX-rect.left,cy=e.clientY-rect.top;
+    dragOff.current={dx:cx-lb.x,dy:cy-lb.y};
+    setDragLabel(id);
+  };
+  const onLabelMove=(e)=>{
+    if(dragLabel===null)return;
+    const rect=ref.current.getBoundingClientRect();
+    const cx=e.clientX-rect.left,cy=e.clientY-rect.top;
+    setLabels(ls=>ls.map(l=>l.id===dragLabel?{...l,x:cx-dragOff.current.dx,y:cy-dragOff.current.dy}:l));
+  };
+  const onLabelUp=()=>{setDragLabel(null);dragOff.current=null;};
+  const deleteLabel=(id)=>{setLabels(ls=>ls.filter(l=>l.id!==id));};
+
+  const dn=e=>{
+    e.preventDefault();
+    if(tool==="select"){
+      const[a,b]=gp(e);const ctx=ref.current.getContext("2d");
+      if(selData&&selRect){
+        // Seçim var — içine tıkladıysa sürükleme başlat
+        if(a>=selRect.x&&a<=selRect.x+selRect.w&&b>=selRect.y&&b<=selRect.y+selRect.h){
+          setSelDrag(true);startPt.current=[a,b];drawing.current=true;return;
+        }
+        // Dışına tıkladı — seçimi sabitle (kesikli kutu olmadan)
+        const pr2=window.devicePixelRatio||2;
+        const c=ref.current;const ctx2=c.getContext("2d");
+        // 1. Temiz arka planı yükle
+        ctx2.putImageData(selSnap.current,0,0);
+        // 2. Seçili kısmı yeni yerine çiz
+        ctx2.save();ctx2.setTransform(1,0,0,1,0,0);
+        ctx2.drawImage(selData,Math.round(selRect.x*pr2),Math.round(selRect.y*pr2));
+        ctx2.restore();
+        // 3. Bu anı yeni snapshot olarak kaydet (kesikli kutu YOK)
+        const cleanState=ctx2.getImageData(0,0,c.width,c.height);
+        // 4. Tekrar yükle (garanti temiz)
+        ctx2.putImageData(cleanState,0,0);
+        // 5. Tüm seçim state'lerini temizle
+        selSnap.current=null;snapshot.current=null;
+        setSelRect(null);setSelData(null);setSelDrag(false);
+        setDirty(true);
+        return;
+      }
+      // Yeni seçim başlat
+      pushUndo();saveSnap();
+      drawing.current=true;startPt.current=[a,b];
+      setSelRect(null);setSelData(null);
+      return;
+    }
+    if(tool==="text"){
+      if(txtMode){commitText();}
+      const[a,b]=gp(e);setTxtPos([a,b]);setTxtMode(true);setTxtVal("");
+      setTimeout(()=>txtRef.current?.focus(),50);return;
+    }
+    if(tool==="tri"||tool==="quad"||tool==="poly"){
+      const[a,b]=gp(e);const ctx=ref.current.getContext("2d");
+      const maxPts=tool==="tri"?3:tool==="quad"?4:999;
+      const newPts=[...polyPts,[a,b]];
+      
+      if(newPts.length===1){
+        // İlk nokta — snapshot al
+        pushUndo();polySnap.current=ctx.getImageData(0,0,ref.current.width,ref.current.height);
+      }
+      
+      // Noktaları ve çizgileri çiz (önizleme)
+      if(polySnap.current)ctx.putImageData(polySnap.current,0,0);
+      ctx.strokeStyle=clr;ctx.lineWidth=sz;ctx.lineCap="round";ctx.lineJoin="round";
+      if(newPts.length>1){
+        ctx.beginPath();ctx.moveTo(newPts[0][0],newPts[0][1]);
+        for(let i=1;i<newPts.length;i++)ctx.lineTo(newPts[i][0],newPts[i][1]);
+        if(newPts.length>=maxPts){ctx.closePath();}
+        ctx.stroke();
+      }
+      // Köşe noktaları çiz
+      ctx.fillStyle=clr;
+      newPts.forEach(p=>{ctx.beginPath();ctx.arc(p[0],p[1],3,0,Math.PI*2);ctx.fill();});
+      
+      if(newPts.length>=maxPts){
+        // Şekil tamamlandı — köşe noktalarını sil, temiz çiz
+        if(polySnap.current)ctx.putImageData(polySnap.current,0,0);
+        ctx.strokeStyle=clr;ctx.lineWidth=sz;ctx.lineCap="round";ctx.lineJoin="round";
+        ctx.beginPath();ctx.moveTo(newPts[0][0],newPts[0][1]);
+        for(let i=1;i<newPts.length;i++)ctx.lineTo(newPts[i][0],newPts[i][1]);
+        ctx.closePath();ctx.stroke();
+        setPolyPts([]);polySnap.current=null;setDirty(true);
+      }else{
+        setPolyPts(newPts);setDirty(true);
+      }
+      return;
+    }
+    if(tool==="curve"){
+      const[a,b]=gp(e);
+      if(curvePhase===0||!curveEnds.current){
+        // Aşama 1: başlangıç noktası, sürükleyerek bitiş belirle
+        pushUndo();saveSnap();curveSnap.current=snapshot.current;
+        drawing.current=true;startPt.current=[a,b];
+        setCurvePhase(1);
+      }else{
+        // Aşama 2: kontrol noktası tıklanarak sabitleniyor
+        if(curveSnap.current)ref.current.getContext("2d").putImageData(curveSnap.current,0,0);
+        const x=ref.current.getContext("2d");
+        const{x1,y1,x2,y2}=curveEnds.current;
+        x.strokeStyle=clr;x.lineWidth=sz;x.lineCap="round";
+        x.beginPath();x.moveTo(x1,y1);x.quadraticCurveTo(a,b,x2,y2);x.stroke();
+        setCurvePhase(0);curveEnds.current=null;curveSnap.current=null;
+        setDirty(true);
+      }
+      return;
+    }
+    if(tool==="fill"){
+      pushUndo();const[a,b]=gp(e);
+      const c=ref.current;const ctx=c.getContext("2d");const pr=window.devicePixelRatio||2;
+      const w=c.width,h=c.height;
+      const imgData=ctx.getImageData(0,0,w,h);const data=imgData.data;
+      const px=Math.round(a*pr),py=Math.round(b*pr);
+      if(px<0||py<0||px>=w||py>=h)return;
+      // Hedef renk
+      const idx=(py*w+px)*4;
+      const tr=data[idx],tg=data[idx+1],tb=data[idx+2],ta=data[idx+3];
+      // Dolgu rengi (hex -> rgb)
+      const fc=clr;const fDiv=document.createElement("div");fDiv.style.color=fc;document.body.appendChild(fDiv);
+      const comp=getComputedStyle(fDiv).color.match(/\d+/g);document.body.removeChild(fDiv);
+      const fr=+comp[0],fg=+comp[1],fb=+comp[2],fa=80; // yarı saydam
+      // Aynı renk mi kontrol
+      if(Math.abs(tr-fr)<10&&Math.abs(tg-fg)<10&&Math.abs(tb-fb)<10)return;
+      // Flood fill (BFS)
+      const match=(i)=>{return Math.abs(data[i]-tr)<30&&Math.abs(data[i+1]-tg)<30&&Math.abs(data[i+2]-tb)<30;};
+      const stack=[[px,py]];const visited=new Set();visited.add(py*w+px);
+      const maxPx=w*h*0.5; // güvenlik limiti
+      let count=0;
+      while(stack.length>0&&count<maxPx){
+        const[cx2,cy2]=stack.pop();count++;
+        const i=(cy2*w+cx2)*4;
+        // Alpha blend
+        const alpha=fa/255;
+        data[i]=Math.round(data[i]*(1-alpha)+fr*alpha);
+        data[i+1]=Math.round(data[i+1]*(1-alpha)+fg*alpha);
+        data[i+2]=Math.round(data[i+2]*(1-alpha)+fb*alpha);
+        // Komşular
+        for(const[dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          const nx=cx2+dx,ny=cy2+dy;
+          if(nx<0||ny<0||nx>=w||ny>=h)continue;
+          const key=ny*w+nx;if(visited.has(key))continue;
+          visited.add(key);
+          const ni=(ny*w+nx)*4;
+          if(match(ni))stack.push([nx,ny]);
+        }
+      }
+      ctx.putImageData(imgData,0,0);
+      setDirty(true);return;
+    }
+    if(tool==="dot"){
+      pushUndo();const[a,b]=gp(e);const x=ref.current.getContext("2d");
+      x.beginPath();x.arc(a,b,sz+1,0,Math.PI*2);x.fillStyle=clr;x.fill();setDirty(true);return;
+    }
+    if(tool==="parallel"){
+      // Paralel işareti: doğru üzerindeki yönü algıla, ona dik ok çizgileri koy
+      pushUndo();const[a,b]=gp(e);const c=ref.current;const ctx=c.getContext("2d");const pr=window.devicePixelRatio||2;
+      // Yön algıla
+      const steps=36;const strengths=new Array(steps).fill(0);
+      for(let i=0;i<steps;i++){const ang=i*Math.PI*2/steps;for(let d=3;d<20;d+=2){const px=Math.round((a+d*Math.cos(ang))*pr),py=Math.round((b+d*Math.sin(ang))*pr);if(px>=0&&py>=0&&px<c.width&&py<c.height){const p=ctx.getImageData(px,py,1,1).data;if(p[0]<200||p[1]<200||p[2]<200)strengths[i]++;}}}
+      const sorted=[...strengths.map((v,i)=>({v,i}))].sort((a,b)=>b.v-a.v);
+      const ang=sorted[0]?.i*Math.PI*2/steps||0;
+      const perp=ang+Math.PI/2;const gap=4;const len=7;
+      // İki çizgi (>> şeklinde)
+      ctx.strokeStyle=clr;ctx.lineWidth=Math.max(1,sz*0.6);
+      for(let g=-1;g<=1;g+=2){
+        const cx2=a+g*gap*Math.cos(ang),cy2=b+g*gap*Math.sin(ang);
+        ctx.beginPath();ctx.moveTo(cx2-len*Math.cos(perp),cy2-len*Math.sin(perp));
+        ctx.lineTo(cx2+len*0.4*Math.cos(ang),cy2+len*0.4*Math.sin(ang));
+        ctx.lineTo(cx2+len*Math.cos(perp),cy2+len*Math.sin(perp));ctx.stroke();
+      }
+      setDirty(true);return;
+    }
+    if(tool==="tick"){
+      pushUndo();const[a,b]=gp(e);const c=ref.current;const ctx=c.getContext("2d");const pr=window.devicePixelRatio||2;
+      const rc2=rightCycle.current;
+      const sameSpot2=Math.abs(a-rc2.x)<6&&Math.abs(b-rc2.y)<6;
+      const tickCount=sameSpot2?(rc2.idx%3)+1:1;
+      rightCycle.current={x:a,y:b,idx:tickCount};
+      if(sameSpot2&&undoStack.length>0){ctx.putImageData(undoStack[undoStack.length-1],0,0);}
+      // Yön algıla
+      const steps=36;const strengths=new Array(steps).fill(0);
+      for(let i=0;i<steps;i++){const ang2=i*Math.PI*2/steps;for(let d=3;d<20;d+=2){const px=Math.round((a+d*Math.cos(ang2))*pr),py=Math.round((b+d*Math.sin(ang2))*pr);if(px>=0&&py>=0&&px<c.width&&py<c.height){const p=ctx.getImageData(px,py,1,1).data;if(p[0]<200||p[1]<200||p[2]<200)strengths[i]++;}}}
+      const sorted=[...strengths.map((v,i)=>({v,i}))].sort((a2,b2)=>b2.v-a2.v);
+      const ang=sorted[0]?.i*Math.PI*2/steps||0;
+      const perp=ang+Math.PI/2;const len=7;
+      ctx.strokeStyle=clr;ctx.lineWidth=Math.max(1,sz*0.6);
+      const gap=4;const startOff=-(tickCount-1)*gap/2;
+      const ts=tickStyle;
+      for(let t=0;t<tickCount;t++){
+        const off=startOff+t*gap;
+        const cx2=a+off*Math.cos(ang),cy2=b+off*Math.sin(ang);
+        if(ts===0){
+          // | düz çizgi
+          ctx.beginPath();ctx.moveTo(cx2-len*Math.cos(perp),cy2-len*Math.sin(perp));
+          ctx.lineTo(cx2+len*Math.cos(perp),cy2+len*Math.sin(perp));ctx.stroke();
+        }else if(ts===1){
+          // || çift çizgi
+          for(let dd=-1.5;dd<=1.5;dd+=3){
+            const ox=cx2+dd*Math.cos(ang),oy=cy2+dd*Math.sin(ang);
+            ctx.beginPath();ctx.moveTo(ox-len*Math.cos(perp),oy-len*Math.sin(perp));
+            ctx.lineTo(ox+len*Math.cos(perp),oy+len*Math.sin(perp));ctx.stroke();
+          }
+        }else if(ts===2){
+          // ~ dalga (S şekli) - doğru doğrultusunda
+          ctx.beginPath();
+          const pts2=8;
+          for(let p2=0;p2<=pts2;p2++){
+            const t2=p2/pts2;
+            // Doğru boyunca ilerle (ang yönünde)
+            const px2=cx2+(t2-0.5)*len*2*Math.cos(ang);
+            const py2=cy2+(t2-0.5)*len*2*Math.sin(ang);
+            // Dalgalanma dik yönde (perp)
+            const wave=Math.sin(t2*Math.PI*2)*3;
+            const wx=px2+wave*Math.cos(perp),wy=py2+wave*Math.sin(perp);
+            if(p2===0)ctx.moveTo(wx,wy);else ctx.lineTo(wx,wy);
+          }
+          ctx.stroke();
+        }else if(ts===3){
+          // ● dolu daire (turuncu)
+          ctx.beginPath();ctx.arc(cx2,cy2,4,0,Math.PI*2);ctx.fillStyle="#d97706";ctx.fill();ctx.strokeStyle=clr;ctx.stroke();
+        }else if(ts===4){
+          // △ küçük üçgen
+          const tl=5;
+          ctx.beginPath();
+          ctx.moveTo(cx2+tl*Math.cos(perp),cy2+tl*Math.sin(perp));
+          ctx.lineTo(cx2-tl*Math.cos(perp),cy2-tl*Math.sin(perp));
+          ctx.lineTo(cx2+tl*Math.cos(ang),cy2+tl*Math.sin(ang));
+          ctx.closePath();ctx.stroke();
+        }
+      }
+      setDirty(true);return;
+    }
+    if(tool==="right"){
+      pushUndo();const[a,b]=gp(e);
+      const s=12;
+      const c=ref.current;const ctx=c.getContext("2d");
+      const pr=window.devicePixelRatio||2;
+      
+      // Aynı noktaya mı tıklanıyor? (5px tolerans)
+      const rc=rightCycle.current;
+      const sameSpot=Math.abs(a-rc.x)<5&&Math.abs(b-rc.y)<5;
+      const quadIdx=sameSpot?(rc.idx+1)%4:0;
+      rightCycle.current={x:a,y:b,idx:quadIdx};
+      
+      // Eğer aynı noktaysa önceki sembolü geri al
+      if(sameSpot&&undoStack.length>0){
+        const prev=undoStack[undoStack.length-1];
+        ctx.putImageData(prev,0,0);
+      }
+      
+      // Köşe etrafında çizgi yönlerini algıla
+      const scanR=30;const steps=36;
+      const strengths=new Array(steps).fill(0);
+      for(let i=0;i<steps;i++){
+        const ang=i*Math.PI*2/steps;
+        for(let d=4;d<scanR;d+=2){
+          const px=Math.round((a+d*Math.cos(ang))*pr);
+          const py=Math.round((b+d*Math.sin(ang))*pr);
+          if(px<0||py<0||px>=c.width||py>=c.height)continue;
+          const pix=ctx.getImageData(px,py,1,1).data;
+          if(pix[0]<200||pix[1]<200||pix[2]<200)strengths[i]++;
+        }
+      }
+      
+      // En güçlü iki yönü bul
+      const sorted=[...strengths.map((v,i)=>({v,i}))].sort((a,b)=>b.v-a.v);
+      let d1Idx=sorted[0]?.i||0;
+      let d2Idx=d1Idx;
+      for(const ss of sorted){
+        let diff=Math.abs(ss.i-d1Idx);
+        if(diff>steps/2)diff=steps-diff;
+        if(diff>=steps/8&&ss.v>0){d2Idx=ss.i;break;}
+      }
+      
+      const ang1=d1Idx*Math.PI*2/steps;
+      const ang2=d2Idx*Math.PI*2/steps;
+      
+      // 4 olası kadran: iki çizginin oluşturduğu 4 bölge
+      // Her çizginin 2 yönü var (+ ve -), kombinasyon = 4 kadran
+      const quads=[
+        [ang1, ang2],
+        [ang1, ang2+Math.PI],
+        [ang1+Math.PI, ang2],
+        [ang1+Math.PI, ang2+Math.PI],
+      ];
+      
+      const[fd1,fd2]=quads[quadIdx];
+      
+      const k1x=a+s*Math.cos(fd1),k1y=b+s*Math.sin(fd1);
+      const k2x=a+s*Math.cos(fd2),k2y=b+s*Math.sin(fd2);
+      const k3x=k1x+(k2x-a),k3y=k1y+(k2y-b);
+      
+      ctx.strokeStyle=clr;ctx.lineWidth=Math.max(1,sz*0.7);
+      ctx.beginPath();ctx.moveTo(k1x,k1y);ctx.lineTo(k3x,k3y);ctx.lineTo(k2x,k2y);ctx.stroke();
+      const dotX=(k1x+k3x+k2x)/3,dotY=(k1y+k3y+k2y)/3;
+      ctx.beginPath();ctx.arc(dotX,dotY,1.5,0,Math.PI*2);ctx.fillStyle=clr;ctx.fill();
+      setDirty(true);return;
+    }
+    if(tool==="arc"){
+      pushUndo();const[a,b]=gp(e);
+      const c=ref.current;const ctx=c.getContext("2d");const pr=window.devicePixelRatio||2;
+      
+      // Aynı noktada döngü
+      const rc=rightCycle.current;
+      const sameSpot=Math.abs(a-rc.x)<5&&Math.abs(b-rc.y)<5;
+      const quadIdx=sameSpot?(rc.idx+1)%4:0;
+      rightCycle.current={x:a,y:b,idx:quadIdx};
+      if(sameSpot&&undoStack.length>0){ctx.putImageData(undoStack[undoStack.length-1],0,0);}
+      
+      // Yön algıla
+      const scanR=30;const steps=36;
+      const strengths=new Array(steps).fill(0);
+      for(let i=0;i<steps;i++){const ang=i*Math.PI*2/steps;for(let d=4;d<scanR;d+=2){const px=Math.round((a+d*Math.cos(ang))*pr),py=Math.round((b+d*Math.sin(ang))*pr);if(px>=0&&py>=0&&px<c.width&&py<c.height){const p=ctx.getImageData(px,py,1,1).data;if(p[0]<200||p[1]<200||p[2]<200)strengths[i]++;}}}
+      const sorted=[...strengths.map((v,i)=>({v,i}))].sort((aa,bb)=>bb.v-aa.v);
+      let d1Idx=sorted[0]?.i||0,d2Idx=d1Idx;
+      for(const ss of sorted){let diff=Math.abs(ss.i-d1Idx);if(diff>steps/2)diff=steps-diff;if(diff>=steps/8&&ss.v>0){d2Idx=ss.i;break;}}
+      
+      const ang1=d1Idx*Math.PI*2/steps;
+      const ang2=d2Idx*Math.PI*2/steps;
+      
+      // 4 kadran
+      const quads=[[ang1,ang2],[ang1,ang2+Math.PI],[ang1+Math.PI,ang2],[ang1+Math.PI,ang2+Math.PI]];
+      const[fa1,fa2]=quads[quadIdx];
+      
+      // Açı farkını hesapla
+      let startA=fa1,endA=fa2;
+      let diff=endA-startA;
+      if(diff<0)diff+=Math.PI*2;
+      if(diff>Math.PI){const tmp=startA;startA=endA;endA=tmp;diff=Math.PI*2-diff;}
+      
+      const r=18;
+      ctx.strokeStyle=clr;ctx.lineWidth=Math.max(1,sz*0.7);
+      ctx.beginPath();ctx.arc(a,b,r,startA,startA+diff);ctx.stroke();
+      
+      // Derece
+      const deg=Math.round(diff*180/Math.PI);
+      const midA=startA+diff/2;const tr=r+12;
+      if(arcShowDeg){ctx.fillStyle=clr;ctx.font=`bold ${Math.max(10,sz*3)}px 'DM Sans',sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";
+      ctx.fillText(deg+"°",a+tr*Math.cos(midA),b+tr*Math.sin(midA));}
+      setDirty(true);return;
+    }
+    drawing.current=true;const[a,b]=gp(e);startPt.current=[a,b];pathPts.current=[[a,b]];lastPt.current=[a,b];
+    pushUndo();saveSnap();
+    const x=ref.current.getContext("2d");
+    if(tool==="pen"||tool==="rawpen"||tool==="eraser"){x.beginPath();x.moveTo(a,b);x.strokeStyle=tool==="eraser"?"#fff":clr;x.lineWidth=tool==="eraser"?sz*8:sz;}
+  };
+  const mv=e=>{
+    e.preventDefault();
+    // Select: seçim çiz veya sürükle
+    if(tool==="select"&&drawing.current){
+      const[a,b]=gp(e);const ctx=ref.current.getContext("2d");const pr=window.devicePixelRatio||2;
+      if(selDrag&&selData&&selRect&&selSnap.current){
+        const dx=a-startPt.current[0],dy=b-startPt.current[1];
+        ctx.putImageData(selSnap.current,0,0);
+        ctx.save();ctx.setTransform(1,0,0,1,0,0);
+        ctx.drawImage(selData,Math.round((selRect.x+dx)*pr),Math.round((selRect.y+dy)*pr));
+        ctx.restore();
+        setSelRect(r=>({...r,x:selRect.x+dx,y:selRect.y+dy}));
+        startPt.current=[a,b];
+        return;
+      }
+      // Yeni seçim kutusu — sadece CSS ile göster
+      const sx=Math.min(startPt.current[0],a),sy=Math.min(startPt.current[1],b);
+      const sw=Math.abs(a-startPt.current[0]),sh=Math.abs(b-startPt.current[1]);
+      setSelRect({x:sx,y:sy,w:sw,h:sh,preview:true});
+      return;
+    }
+    // Curve aşama 2: kontrol noktası fareyi takip eder
+    if(tool==="curve"&&curvePhase===1&&!drawing.current&&curveEnds.current){
+      const[a,b]=gp(e);
+      if(curveSnap.current)ref.current.getContext("2d").putImageData(curveSnap.current,0,0);
+      const x=ref.current.getContext("2d");
+      const{x1,y1,x2,y2}=curveEnds.current;
+      x.strokeStyle=clr;x.lineWidth=sz;x.lineCap="round";
+      x.beginPath();x.moveTo(x1,y1);x.quadraticCurveTo(a,b,x2,y2);x.stroke();
+      return;
+    }
+    if(!drawing.current)return;const[a,b]=gp(e);pathPts.current.push([a,b]);
+    const x=ref.current.getContext("2d");
+    // Curve aşama 1: bitiş noktası sürükleniyor (geçici rehber çizgi)
+    if(tool==="curve"){
+      restoreSnap();
+      x.strokeStyle="#bbb";x.lineWidth=0.8;x.setLineDash([4,4]);
+      x.beginPath();x.moveTo(startPt.current[0],startPt.current[1]);x.lineTo(a,b);x.stroke();
+      x.setLineDash([]);
+      // Uç noktaları göster
+      x.fillStyle=clr;
+      x.beginPath();x.arc(startPt.current[0],startPt.current[1],3,0,Math.PI*2);x.fill();
+      x.beginPath();x.arc(a,b,3,0,Math.PI*2);x.fill();
+      return;
+    }
+    if(tool==="line"||tool==="arrow"||tool==="dash"||tool==="dblarrow"){
+      restoreSnap();const sx=startPt.current[0],sy=startPt.current[1];
+      x.strokeStyle=clr;x.lineWidth=sz;
+      if(tool==="dash"){
+        x.setLineDash([6,4]);x.beginPath();x.moveTo(sx,sy);x.lineTo(a,b);x.stroke();x.setLineDash([]);
+      }else{
+        x.beginPath();x.moveTo(sx,sy);x.lineTo(a,b);x.stroke();
+      }
+      const ang=Math.atan2(b-sy,a-sx);const hl=Math.max(8,sz*3);
+      if(tool==="arrow"||tool==="dblarrow"){
+        x.beginPath();x.moveTo(a,b);x.lineTo(a-hl*Math.cos(ang-0.4),b-hl*Math.sin(ang-0.4));x.moveTo(a,b);x.lineTo(a-hl*Math.cos(ang+0.4),b-hl*Math.sin(ang+0.4));x.stroke();
+      }
+      if(tool==="dblarrow"){
+        const ang2=ang+Math.PI;
+        x.beginPath();x.moveTo(sx,sy);x.lineTo(sx-hl*Math.cos(ang2-0.4),sy-hl*Math.sin(ang2-0.4));x.moveTo(sx,sy);x.lineTo(sx-hl*Math.cos(ang2+0.4),sy-hl*Math.sin(ang2+0.4));x.stroke();
+      }
+    }else if(tool==="circle"){
+      restoreSnap();const r=Math.sqrt((a-startPt.current[0])**2+(b-startPt.current[1])**2);
+      x.beginPath();x.arc(startPt.current[0],startPt.current[1],r,0,Math.PI*2);x.strokeStyle=clr;x.lineWidth=sz;x.stroke();
+    }else if(tool==="rect"){
+      restoreSnap();const rx=Math.min(startPt.current[0],a),ry=Math.min(startPt.current[1],b);
+      const rw=Math.abs(a-startPt.current[0]),rh=Math.abs(b-startPt.current[1]);
+      x.beginPath();x.rect(rx,ry,rw,rh);x.strokeStyle=clr;x.lineWidth=sz;x.stroke();
+    }else if(tool==="pen"){
+      const lp=lastPt.current;const mx=(lp[0]+a)/2,my=(lp[1]+b)/2;
+      x.quadraticCurveTo(lp[0],lp[1],mx,my);x.stroke();lastPt.current=[a,b];
+    }else if(tool==="rawpen"){
+      x.lineTo(a,b);x.stroke();
+    }else{x.lineTo(a,b);x.stroke();}
+    setDirty(true);
+  };
+
+  const drawSmooth=(ctx,pts,color,width)=>{
+    if(pts.length<3)return;
+    const sp=[];for(let i=0;i<pts.length;i+=3)sp.push(pts[i]);
+    if(sp[sp.length-1]!==pts[pts.length-1])sp.push(pts[pts.length-1]);
+    if(sp.length<3)return;
+    ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap="round";ctx.lineJoin="round";
+    ctx.moveTo(sp[0][0],sp[0][1]);
+    for(let i=0;i<sp.length-1;i++){
+      const p0=sp[Math.max(0,i-1)],p1=sp[i],p2=sp[Math.min(sp.length-1,i+1)],p3=sp[Math.min(sp.length-1,i+2)];
+      ctx.bezierCurveTo(p1[0]+(p2[0]-p0[0])/6,p1[1]+(p2[1]-p0[1])/6,p2[0]-(p3[0]-p1[0])/6,p2[1]-(p3[1]-p1[1])/6,p2[0],p2[1]);
+    }
+    ctx.stroke();
+  };
+
+  const up=e=>{
+    e.preventDefault();
+    if(tool==="select"&&drawing.current){
+      const[a,b]=gp(e);const ctx=ref.current.getContext("2d");const pr=window.devicePixelRatio||2;
+      if(selDrag&&selData&&selRect){
+        // Sürükleme bitti — yeni pozisyonda selSnap güncelle
+        const dx=a-startPt.current[0],dy=b-startPt.current[1];
+        const nx=selRect.x+dx,ny=selRect.y+dy;
+        // Temiz arka planı yeniden çiz (selSnap = beyaz alanla)
+        // selSnap zaten temiz, sadece rect pozisyonunu güncelle
+        setSelRect({x:nx,y:ny,w:selRect.w,h:selRect.h});
+        setSelDrag(false);drawing.current=false;return;
+      }
+      // Seçim kutusu tamamlandı — alanı kes
+      const sx=Math.min(startPt.current[0],a),sy=Math.min(startPt.current[1],b);
+      const sw=Math.abs(a-startPt.current[0]),sh=Math.abs(b-startPt.current[1]);
+      if(sw>5&&sh>5){
+        const pr=window.devicePixelRatio||2;
+        // Seçili alanın piksellerini kaydet
+        const tempCanvas=document.createElement("canvas");
+        tempCanvas.width=Math.round(sw*pr);tempCanvas.height=Math.round(sh*pr);
+        const tCtx=tempCanvas.getContext("2d");
+        tCtx.drawImage(ref.current,Math.round(sx*pr),Math.round(sy*pr),Math.round(sw*pr),Math.round(sh*pr),0,0,Math.round(sw*pr),Math.round(sh*pr));
+        // Orijinal alanı beyazla doldur
+        ctx.fillStyle="#fff";ctx.fillRect(sx,sy,sw,sh);
+        // Temiz arka planı kaydet
+        selSnap.current=ctx.getImageData(0,0,ref.current.width,ref.current.height);
+        // Seçili kısmı eski yerine çiz
+        ctx.save();ctx.setTransform(1,0,0,1,0,0);
+        ctx.drawImage(tempCanvas,Math.round(sx*pr),Math.round(sy*pr));
+        ctx.restore();
+        setSelRect({x:sx,y:sy,w:sw,h:sh});setSelData(tempCanvas);
+      }
+      drawing.current=false;snapshot.current=null;return;
+    }
+    // Curve aşama 1 bitti: uç noktalar belirlendi, aşama 2'ye geç
+    if(tool==="curve"&&drawing.current&&curvePhase===1){
+      const[a,b]=gp(e);
+      curveEnds.current={x1:startPt.current[0],y1:startPt.current[1],x2:a,y2:b};
+      // Rehber çizgiyi sil, temiz hali kaydet
+      restoreSnap();
+      curveSnap.current=ref.current.getContext("2d").getImageData(0,0,ref.current.width,ref.current.height);
+      drawing.current=false;snapshot.current=null;
+      return;
+    }
+    if(drawing.current&&tool==="pen"&&pathPts.current.length>4&&snapshot.current){
+      restoreSnap();drawSmooth(ref.current.getContext("2d"),pathPts.current,clr,sz);
+    }
+    drawing.current=false;snapshot.current=null;lastPt.current=null;
+  };
+
+  const drawGrid=(opts)=>{
+    pushUndo();
+    const g=opts||gridOpt;
+    const c=ref.current;if(!c)return;const x=c.getContext("2d");
+    const w=c.offsetWidth,h=c.offsetHeight,cx=Math.round(w/2),cy=Math.round(h/2),step=30;
+    if(g.grid){x.strokeStyle="#e0e0e0";x.lineWidth=0.5;for(let i=step;i<w;i+=step){x.beginPath();x.moveTo(i,0);x.lineTo(i,h);x.stroke();}for(let i=step;i<h;i+=step){x.beginPath();x.moveTo(0,i);x.lineTo(w,i);x.stroke();}}
+    x.strokeStyle="#444";x.lineWidth=1.5;x.beginPath();x.moveTo(0,cy);x.lineTo(w,cy);x.stroke();x.beginPath();x.moveTo(cx,0);x.lineTo(cx,h);x.stroke();
+    x.beginPath();x.moveTo(w-2,cy);x.lineTo(w-10,cy-5);x.moveTo(w-2,cy);x.lineTo(w-10,cy+5);x.stroke();
+    x.beginPath();x.moveTo(cx,2);x.lineTo(cx-5,10);x.moveTo(cx,2);x.lineTo(cx+5,10);x.stroke();
+    let num;x.fillStyle="#888";x.font="10px 'DM Sans',sans-serif";x.textAlign="center";x.strokeStyle="#444";x.lineWidth=1;
+    num=1;for(let i=cx+step;i<w-15;i+=step){x.beginPath();x.moveTo(i,cy-3);x.lineTo(i,cy+3);x.stroke();if(g.nums)x.fillText(num,i,cy+14);num++;}
+    num=-1;for(let i=cx-step;i>15;i-=step){x.beginPath();x.moveTo(i,cy-3);x.lineTo(i,cy+3);x.stroke();if(g.nums)x.fillText(num,i,cy+14);num--;}
+    num=1;for(let i=cy-step;i>15;i-=step){x.beginPath();x.moveTo(cx-3,i);x.lineTo(cx+3,i);x.stroke();if(g.nums)x.fillText(num,cx-12,i+4);num++;}
+    num=-1;for(let i=cy+step;i<h-15;i+=step){x.beginPath();x.moveTo(cx-3,i);x.lineTo(cx+3,i);x.stroke();if(g.nums)x.fillText(num,cx-12,i+4);num--;}
+    x.fillStyle="#444";x.font="bold 12px 'DM Sans',sans-serif";x.fillText("x",w-10,cy-10);x.fillText("y",cx+10,14);x.fillText("O",cx-12,cy+14);
+    setDirty(true);
+  };
+
+  const toolGroups=[
+    {label:"Araç",tools:[{id:"select",icon:"⊡",tip:"Seç ve taşı"},{id:"eraser",icon:"🧹",tip:"Silgi"}]},
+    {label:"Çizim",tools:[{id:"pen",icon:"✏️",tip:"Serbest çizim (pürüzsüz)"},{id:"rawpen",icon:"🖊️",tip:"Ham kalem"},{id:"line",icon:"╱",tip:"Düz çizgi"},{id:"curve",icon:"⌢",tip:"Yay (eğri)"},{id:"dash",icon:"┄",tip:"Kesikli çizgi"}]},
+    {label:"Ok",tools:[{id:"arrow",icon:"→",tip:"Ok"},{id:"dblarrow",icon:"⟷",tip:"Çift ok (ölçü)"}]},
+    {label:"Şekil",tools:[{id:"tri",icon:"△",tip:"Üçgen"},{id:"quad",icon:"◇",tip:"Dörtgen"},{id:"poly",icon:"⬠",tip:"Çokgen"},{id:"rect",icon:"▭",tip:"Dikdörtgen"},{id:"circle",icon:"○",tip:"Daire"}]},
+    {label:"İşaret",tools:[{id:"arc",icon:"⌒",tip:"Açı yayı"},{id:"right",icon:"⊾",tip:"Dik açı"},{id:"parallel",icon:"∥",tip:"Paralel"},{id:"tick",icon:"╫",tip:"Eşit kenar"},{id:"dot",icon:"●",tip:"Nokta"},{id:"fill",icon:"🪣",tip:"Boya"}]},
+    {label:"Metin",tools:[{id:"text",icon:"A",tip:"Metin"}]},
+  ];
+
+  return(<div className="cv-wrap">
+    <div className="cvb">
+      {toolGroups.map((g,gi)=><div key={gi} className="cvb-grp">
+        <span className="cvb-gl">{g.label}</span>
+        <div className="cvb-g">{g.tools.map(t=><button key={t.id} className={`ct${tool===t.id?" on":""}`} onClick={()=>{setTool(t.id);if(txtMode)commitText();setPolyPts([]);polySnap.current=null;setCurvePhase(0);curveEnds.current=null;}} title={t.tip}>{t.icon}</button>)}</div>
+      </div>)}
+      {tool==="arc"&&<label className="cb-chk"><input type="checkbox" checked={arcShowDeg} onChange={e=>setArcShowDeg(e.target.checked)}/>Derece</label>}
+      {(tool==="tri"||tool==="quad"||tool==="poly")&&polyPts.length>0&&<div className="cvb-g"><span className="cvb-rl">{polyPts.length}/{tool==="tri"?3:tool==="quad"?4:"∞"} nokta</span>{tool==="poly"&&polyPts.length>=3&&<button className="ct ct-a" style={{fontSize:9}} onClick={()=>{
+        const ctx=ref.current.getContext("2d");if(polySnap.current)ctx.putImageData(polySnap.current,0,0);
+        ctx.strokeStyle=clr;ctx.lineWidth=sz;ctx.lineCap="round";ctx.lineJoin="round";
+        ctx.beginPath();ctx.moveTo(polyPts[0][0],polyPts[0][1]);
+        for(let i=1;i<polyPts.length;i++)ctx.lineTo(polyPts[i][0],polyPts[i][1]);
+        ctx.closePath();ctx.stroke();setPolyPts([]);polySnap.current=null;setDirty(true);
+      }}>✓ Kapat</button>}</div>}
+      {tool==="tick"&&<div className="cvb-g cvb-ts">
+        {[["│",0],["║",1],["∿",2],["○",3],["△",4]].map(([icon,s])=>
+          <button key={s} className={`ct ct-ts${tickStyle===s?" on":""}`} onClick={()=>setTickStyle(s)} title={["Çizgi","Çift çizgi","Dalga","Daire","Üçgen"][s]}>{icon}</button>
+        )}
+      </div>}
+      {tool==="text"&&<><div className="cvb-g cvb-sz"><span className="cvb-rl">Yazı</span>{[10,12,14,18,22,28].map(s=><button key={s} className={`ct ct-ts${txtSize===s?" on":""}`} onClick={()=>setTxtSize(s)}>{s}</button>)}</div><div className="cvb-g">{["|","°","²","³","⊥","∥","α","β","θ","π","∞","△"].map(s=><button key={s} className="ct ct-sym" onClick={()=>setTxtVal(v=>v+s)}>{s}</button>)}</div></>}
+      <div className="cbs"/>
+      <div className="cvb-g">{["#111","#c00","#2563eb","#16a34a","#9333ea","#d97706"].map(c=><button key={c} className={`ct cclr${clr===c?" on":""}`} style={{background:c}} onClick={()=>{setClr(c);if(tool==="eraser")setTool("pen");}}/>)}</div>
+      <div className="cbs"/>
+      <div className="cvb-g cvb-sz"><span className="cvb-sl">{tool==="eraser"?Math.round(sz*8):sz}</span><input type="range" min="1" max="8" step=".5" value={sz} onChange={e=>setSz(+e.target.value)} className="cbr"/></div>
+      <div className="cbs"/>
+      <div className="cvb-g">
+        <button className="ct" onClick={()=>drawGrid()} title="Koordinat düzlemi">📊</button>
+        <label className="cb-chk"><input type="checkbox" checked={gridOpt.grid} onChange={e=>{const ng={...gridOpt,grid:e.target.checked};setGridOpt(ng);drawGrid(ng);}}/>Izgara</label>
+        <label className="cb-chk"><input type="checkbox" checked={gridOpt.nums} onChange={e=>{const ng={...gridOpt,nums:e.target.checked};setGridOpt(ng);drawGrid(ng);}}/>Rakam</label>
+      </div>
+      <div className="cbs"/>
+      <div className="cvb-g">
+        <button className="ct" onClick={undo} disabled={!undoStack.length} title="Geri al (Ctrl+Z)">↩</button>
+        <button className="ct" onClick={init} title="Temizle">🗑️</button>
+        <div className="cbs"/>
+        <button className="ct" onClick={()=>{
+          const c=ref.current;const ctx=c.getContext("2d");const img=ctx.getImageData(0,0,c.width,c.height);
+          setCvH(h=>Math.max(200,h-50));
+          setTimeout(()=>{const c2=ref.current;const p=window.devicePixelRatio||2;c2.width=c2.offsetWidth*p;c2.height=c2.offsetHeight*p;const x=c2.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c2.offsetWidth,c2.offsetHeight);x.putImageData(img,0,0);},50);
+        }} title="Canvas küçült">▲</button>
+        <span className="cvb-sl">{cvH}px</span>
+        <button className="ct" onClick={()=>{
+          const c=ref.current;const ctx=c.getContext("2d");const img=ctx.getImageData(0,0,c.width,c.height);
+          setCvH(h=>Math.min(700,h+50));
+          setTimeout(()=>{const c2=ref.current;const p=window.devicePixelRatio||2;c2.width=c2.offsetWidth*p;c2.height=c2.offsetHeight*p;const x=c2.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c2.offsetWidth,c2.offsetHeight);x.putImageData(img,0,0);},50);
+        }} title="Canvas büyüt">▼</button>
+      </div>
+      <div className="cbs"/>
+      <div className="cvb-g">
+        {onDone&&<button className="ct ct-p" disabled={!dirty||busy} onClick={()=>{bakeLabels();onDone(ref.current.toDataURL("image/png"));}}>{busy?"⏳":"🔄 Çevir"}</button>}
+        {onAddAsImage&&<button className="ct ct-a" disabled={!dirty} onClick={()=>{bakeLabels();const d=ref.current.toDataURL("image/png");onAddAsImage(d);init();}}>📎 Ekle</button>}
+      </div>
+    </div>
+    <div className="cv-area" onMouseMove={onLabelMove} onMouseUp={onLabelUp} onMouseLeave={onLabelUp}>
+      <canvas ref={ref} className="cvc" style={{height:cvH}} onMouseDown={dn} onMouseMove={mv} onMouseUp={up} onMouseLeave={up} onTouchStart={dn} onTouchMove={mv} onTouchEnd={up}
+        onDoubleClick={e=>{
+          if(tool==="poly"&&polyPts.length>=3){
+            e.preventDefault();const ctx=ref.current.getContext("2d");
+            if(polySnap.current)ctx.putImageData(polySnap.current,0,0);
+            ctx.strokeStyle=clr;ctx.lineWidth=sz;ctx.lineCap="round";ctx.lineJoin="round";
+            ctx.beginPath();ctx.moveTo(polyPts[0][0],polyPts[0][1]);
+            for(let i=1;i<polyPts.length;i++)ctx.lineTo(polyPts[i][0],polyPts[i][1]);
+            ctx.closePath();ctx.stroke();
+            setPolyPts([]);polySnap.current=null;setDirty(true);
+          }
+        }}/>
+      {selRect&&<div className="cv-sel" style={{left:selRect.x,top:selRect.y,width:selRect.w,height:selRect.h}}/>}
+      {labels.map(lb=><div key={lb.id} className={`cv-lb${dragLabel===lb.id?" cv-lb-drag":""}`}
+        style={{left:lb.x,top:lb.y,fontSize:lb.size,color:lb.color}}
+        onMouseDown={e=>onLabelDown(e,lb.id)}
+        onDoubleClick={e=>{e.stopPropagation();deleteLabel(lb.id);}}>
+        {lb.text}
+        <button className="cv-lb-x" onMouseDown={e=>{e.stopPropagation();deleteLabel(lb.id);}}>×</button>
+      </div>)}
+      {txtMode&&txtPos&&<div className="cv-txt-wrap" style={{left:txtPos[0],top:txtPos[1]}}>
+        <input ref={txtRef} className="cv-txt" style={{fontSize:txtSize,color:clr}} value={txtVal} onChange={e=>setTxtVal(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commitText();}} onBlur={e=>{if(!e.relatedTarget?.classList?.contains("cv-sym"))commitText();}} placeholder="Yazın..."/>
+        <div className="cv-sym-row">{["|","°","²","³","⊥","∥","α","β","θ","π","∞","△","→"].map(s=><button key={s} className="cv-sym" tabIndex={0} onMouseDown={e=>{e.preventDefault();setTxtVal(v=>v+s);setTimeout(()=>txtRef.current?.focus(),10);}}>{s}</button>)}</div>
+      </div>}
+    </div>
+  </div>);
+}
+
+/* ═══ S1 — Formül Çevir ═══ */
+function S1({font,sendToS2}){
+  const[res,setRes]=useState([]);const[mode,setMode]=useState("draw");const[busy,setBusy]=useState(false);const[err,setErr]=useState("");const[cp,setCp]=useState(null);
+  const[fsize,setFsize]=useState(20); // formula display size in px
+  const ff=(FONTS.find(f=>f.id===font)||FONTS[0]).f;
+  const recognize=async(du)=>{setBusy(true);setErr("");try{
+    const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/png";
+    const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_FORMULA}]);
+    const j=parseJ(raw);if(j.results?.length)setRes(p=>[...p,...j.results]);else setErr("Tanınamadı.");
+  }catch(e){setErr(e.message==="Failed to fetch"?"Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.":e.message);}setBusy(false);};
+  const copy=(t,k)=>{navigator.clipboard?.writeText(t);setCp(k);setTimeout(()=>setCp(null),1500);};
+  return(<div className="sc">
+    <div className="stabs"><button className={`st${mode==="draw"?" on":""}`} onClick={()=>setMode("draw")}>✏️ Elle Yaz</button><button className={`st${mode==="img"?" on":""}`} onClick={()=>setMode("img")}>📷 Resim</button></div>
+    {mode==="draw"&&<Canvas onDone={recognize} busy={busy} onAddAsImage={(dataUrl)=>{sendToS2('<img src="'+dataUrl+'" style="max-width:100%;height:auto"/>');}}/>}
+    {mode==="img"&&<label className="upz">{busy?<><div className="ups"/><span>Tanınıyor...</span></>:<><span style={{fontSize:28}}>📷</span><span>Formül fotoğrafı yükle</span></>}<input type="file" accept="image/*" hidden disabled={busy} onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f){const r=new FileReader();r.onload=()=>recognize(r.result);r.readAsDataURL(f);}}}/></label>}
+    {err&&<div className="er">⚠️ {err}</div>}
+    {res.length>0&&<div className="rl"><div className="rlh"><b>Formüller ({res.length})</b><div className="rsz"><button className="rsb" onClick={()=>setFsize(s=>Math.max(12,s-2))}>A−</button><span className="rst">{fsize}px</span><button className="rsb" onClick={()=>setFsize(s=>Math.min(40,s+2))}>A+</button></div><button className="bxx" onClick={()=>setRes([])}>Temizle</button></div>
+      {res.map((r,i)=><div key={i} className="rc">
+        <div className="rcm" style={{fontFamily:ff,fontSize:fsize+'px'}} dangerouslySetInnerHTML={{__html:r.text}}/>
+        {r.latex&&r.latex!==r.text&&<div className="rcl">LaTeX: {r.latex}</div>}
+        <div className="rca">
+          <button className={`bcp${cp===`${i}t`?" ok":""}`} onClick={()=>copy(r.text,`${i}t`)}>{cp===`${i}t`?"✓ Kopyalandı":"📋 Kopyala"}</button>
+          {r.latex&&<button className={`bcp bcp2${cp===`${i}l`?" ok":""}`} onClick={()=>copy(r.latex,`${i}l`)}>{cp===`${i}l`?"✓ Kopyalandı":"📋 LaTeX"}</button>}
+          <button className="bcp bcp3" onClick={()=>sendToS2(r.text)}>📤 Soru Tara'ya Ekle</button>
+        </div>
+      </div>)}
+    </div>}
+  </div>);
+}
+
+/* ═══ Editable Question Item with Drag + Copy ═══ */
+function QItem({index,html,onUpdate,onDelete,onCopy,onDragStart,onDragOver,onDrop,dragging,onReconvert,reconverting}){
+  const ref=useRef();
+  const handleBlur=()=>{
+    if(ref.current) onUpdate(ref.current.innerHTML);
+  };
+  const isImg=typeof html==='string'&&html.startsWith('<img ');
+  return(
+    <div className={`qr${dragging?" qr-drag":""}`}
+      draggable onDragStart={e=>{e.dataTransfer.effectAllowed="move";onDragStart(index);}}
+      onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect="move";onDragOver(index);}}
+      onDrop={e=>{e.preventDefault();onDrop(index);}}>
+      <span className="qhandle" title="Sürükle">⠿</span>
+      <span className="qn">{index+1}</span>
+      {isImg?<div className="qimg"><img src={html.match(/src="([^"]+)"/)?.[1]} style={{maxWidth:"100%",maxHeight:120}}/></div>:
+      <div className="qce" ref={ref} contentEditable suppressContentEditableWarning
+        dangerouslySetInnerHTML={{__html:html}} onBlur={handleBlur}/>}
+      <div className="qbtns">
+        {onReconvert&&<button className="qcv" disabled={reconverting} onClick={onReconvert} title={isImg?"Metne çevir":"AI ile tekrar çevir"}>{reconverting?"⏳":"🔄"}</button>}
+        <button className="qcp" onClick={onCopy} title="Kopyala">📋</button>
+        <button className="qd" onClick={onDelete} title="Sil">✕</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ S2 — Soru Tara (AI HTML çıktı) ═══ */
+function S2({font,setFont,clipboard,clearClip,setClip}){
+  const[qs,setQs]=useState([]);
+  const[tpl,setTpl]=useState("yaprak");const[cols,setCols]=useState(2);
+  const[cfg,setCfg]=useState({konu:"MATEMATİK",alt:"Konu Testi",no:"01",opt:5,okul:"",baslik:"",sure:"40",unite:"ÜNİTE 1"});
+  const[busy,setBusy]=useState(false);const[err,setErr]=useState("");const[show,setShow]=useState(false);const[txt,setTxt]=useState("");
+  const[addMode,setAddMode]=useState("text"); // text | shape | graph
+  const[shapeDesc,setShapeDesc]=useState("");const[shapeLoading,setShapeLoading]=useState(false);
+  const[cleaning,setCleaning]=useState(false);
+  const[loaded,setLoaded]=useState(false);
+
+  // Açılışta kayıtlı çalışmayı yükle
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const r=await window.storage?.get("mathstudio-s2");
+        if(r&&r.value){
+          const d=JSON.parse(r.value);
+          // Sadece string olan soruları yükle (object olanları filtrele)
+          if(d.qs?.length){setQs(d.qs.filter(q=>typeof q==='string'));setShow(true);}
+          if(d.tpl)setTpl(d.tpl);
+          if(d.cols)setCols(d.cols);
+          if(d.cfg)setCfg(c=>({...c,...d.cfg}));
+        }
+      }catch(e){}
+      setLoaded(true);
+    })();
+  },[]);
+
+  // Sorular değişince otomatik kaydet
+  useEffect(()=>{
+    if(!loaded)return;
+    (async()=>{
+      try{await window.storage?.set("mathstudio-s2",JSON.stringify({qs,tpl,cols,cfg}));}catch(e){}
+    })();
+  },[qs,tpl,cols,cfg,loaded]);
+  const[graphFns,setGraphFns]=useState([{fn:"x*x-4*x+3",color:"#2563eb",label:"f(x)"}]);
+  const[graphXmin,setGraphXmin]=useState(-2);const[graphXmax,setGraphXmax]=useState(6);
+  const[graphYmin,setGraphYmin]=useState("auto");const[graphYmax,setGraphYmax]=useState("auto");
+  const[graphGrid,setGraphGrid]=useState(true);const[graphRoots,setGraphRoots]=useState(true);const[graphNums,setGraphNums]=useState(true);
+  const[graphSize,setGraphSize]=useState(320);
+
+  const addGraphFn=()=>{
+    const colors=["#2563eb","#c00","#16a34a","#9333ea","#d97706"];
+    const labels=["f(x)","g(x)","h(x)","p(x)","q(x)"];
+    const idx=graphFns.length;
+    setGraphFns(f=>[...f,{fn:"",color:colors[idx%5],label:labels[idx%5]}]);
+  };
+  const updateGraphFn=(i,key,val)=>setGraphFns(f=>f.map((g,j)=>j===i?{...g,[key]:val}:g));
+  const removeGraphFn=(i)=>setGraphFns(f=>f.filter((_,j)=>j!==i));
+
+  const generateGraph=()=>{
+    try{
+      const xmin=Number(graphXmin),xmax=Number(graphXmax);
+      const W=graphSize,H=Math.round(graphSize*0.75),pad=35;
+      const pw=W-2*pad,ph=H-2*pad;
+      
+      // Tüm fonksiyonların noktalarını hesapla
+      let globalYmin=Infinity,globalYmax=-Infinity;
+      const allCurves=graphFns.filter(g=>g.fn.trim()).map(g=>{
+        const fn2=g.fn.replace(/\^/g,'**');
+        const pts=[];
+        for(let i=0;i<=200;i++){
+          const x=xmin+(xmax-xmin)*i/200;
+          try{const y=Function('x','return '+fn2)(x);if(isFinite(y)&&Math.abs(y)<1e6){pts.push({x,y});globalYmin=Math.min(globalYmin,y);globalYmax=Math.max(globalYmax,y);}}catch(e){}
+        }
+        return{...g,pts,fn2};
+      });
+      if(!allCurves.length)return;
+      
+      // Y aralığı
+      const ym=globalYmax-globalYmin||1;
+      let ymin=graphYmin==="auto"?globalYmin-ym*0.1:Number(graphYmin);
+      let ymax=graphYmax==="auto"?globalYmax+ym*0.1:Number(graphYmax);
+      if(ymin>=ymax){ymin=globalYmin-1;ymax=globalYmax+1;}
+      
+      const sx=x=>(pad+(x-xmin)/(xmax-xmin)*pw);
+      const sy=y=>(pad+(ymax-y)/(ymax-ymin)*ph);
+      
+      let svg=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="background:#fff">`;
+      
+      // Izgara
+      if(graphGrid){
+        for(let i=Math.ceil(xmin);i<=Math.floor(xmax);i++){const px=sx(i);svg+=`<line x1="${px}" y1="${pad}" x2="${px}" y2="${H-pad}" stroke="#f0f0f0" stroke-width="0.5"/>`;}
+        for(let i=Math.ceil(ymin);i<=Math.floor(ymax);i++){const py=sy(i);svg+=`<line x1="${pad}" y1="${py}" x2="${W-pad}" y2="${py}" stroke="#f0f0f0" stroke-width="0.5"/>`;}
+      }
+      
+      // Eksenler
+      const ox=sx(0),oy=sy(0);
+      if(ox>=pad&&ox<=W-pad)svg+=`<line x1="${ox}" y1="${pad-5}" x2="${ox}" y2="${H-pad+5}" stroke="#555" stroke-width="1.2"/>`;
+      if(oy>=pad&&oy<=H-pad)svg+=`<line x1="${pad-5}" y1="${oy}" x2="${W-pad+5}" y2="${oy}" stroke="#555" stroke-width="1.2"/>`;
+      // Ok uçları
+      if(ox>=pad&&ox<=W-pad)svg+=`<polygon points="${ox},${pad-5} ${ox-3},${pad+2} ${ox+3},${pad+2}" fill="#555"/>`;
+      if(oy>=pad&&oy<=H-pad)svg+=`<polygon points="${W-pad+5},${oy} ${W-pad-2},${oy-3} ${W-pad-2},${oy+3}" fill="#555"/>`;
+      svg+=`<text x="${W-pad+8}" y="${(oy||H-pad)+4}" font-size="12" fill="#555" font-weight="600">x</text>`;
+      svg+=`<text x="${(ox||pad)+6}" y="${pad-8}" font-size="12" fill="#555" font-weight="600">y</text>`;
+      
+      // Sayı işaretleri
+      if(graphNums){
+        for(let i=Math.ceil(xmin);i<=Math.floor(xmax);i++){
+          if(i===0)continue;const px=sx(i);
+          svg+=`<line x1="${px}" y1="${(oy||H-pad)-3}" x2="${px}" y2="${(oy||H-pad)+3}" stroke="#555" stroke-width="0.8"/>`;
+          svg+=`<text x="${px}" y="${(oy||H-pad)+14}" font-size="9" fill="#888" text-anchor="middle">${i}</text>`;
+        }
+        for(let i=Math.ceil(ymin);i<=Math.floor(ymax);i++){
+          if(i===0)continue;const py=sy(i);
+          svg+=`<line x1="${(ox||pad)-3}" y1="${py}" x2="${(ox||pad)+3}" y2="${py}" stroke="#555" stroke-width="0.8"/>`;
+          svg+=`<text x="${(ox||pad)-8}" y="${py+3}" font-size="9" fill="#888" text-anchor="end">${i}</text>`;
+        }
+        if(ox>=pad&&ox<=W-pad&&oy>=pad&&oy<=H-pad)svg+=`<text x="${ox-8}" y="${oy+14}" font-size="9" fill="#888">0</text>`;
+      }
+      
+      // Eğriler
+      allCurves.forEach(curve=>{
+        const pathPts=curve.pts.map(p=>`${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`);
+        svg+=`<polyline points="${pathPts.join(' ')}" fill="none" stroke="${curve.color}" stroke-width="2.2" stroke-linecap="round"/>`;
+        
+        // Kökler (y≈0 olan noktalar)
+        if(graphRoots){
+          for(let i=1;i<curve.pts.length;i++){
+            const p1=curve.pts[i-1],p2=curve.pts[i];
+            if(p1.y*p2.y<=0&&Math.abs(p1.y-p2.y)>0.001){
+              const t=-p1.y/(p2.y-p1.y);const rx=p1.x+t*(p2.x-p1.x);
+              svg+=`<circle cx="${sx(rx).toFixed(1)}" cy="${sy(0).toFixed(1)}" r="4" fill="${curve.color}" stroke="#fff" stroke-width="1.5"/>`;
+              svg+=`<text x="${sx(rx).toFixed(1)}" y="${sy(0)-8}" font-size="8" fill="${curve.color}" text-anchor="middle">${rx.toFixed(1)}</text>`;
+            }
+          }
+        }
+        // Etiket
+        const lastPt=curve.pts[curve.pts.length-1];
+        if(lastPt)svg+=`<text x="${sx(lastPt.x)-5}" y="${sy(lastPt.y)-8}" font-size="10" fill="${curve.color}" font-weight="600" font-style="italic">${curve.label}</text>`;
+      });
+      
+      svg+=`</svg>`;
+      saveHistory();
+      setQs(p=>[...p,`<div class="qsvg">${svg}</div>`]);
+      setShow(true);
+    }catch(e){setErr("Fonksiyon hatası: "+e.message);}
+  };
+  const[dragIdx,setDragIdx]=useState(null);const[overIdx,setOverIdx]=useState(null);
+  const[history,setHistory]=useState([]);
+  const[perPage,setPerPage]=useState(10);
+  const[qSize,setQSize]=useState(11);
+  const[spacings,setSpacings]=useState({});
+  const[imgSizes,setImgSizes]=useState({});
+  const[imgOffsets,setImgOffsets]=useState({});
+  const pvRef=useRef();const ff=(FONTS.find(f=>f.id===font)||FONTS[0]).f;const uc=(k,v)=>setCfg({...cfg,[k]:v});
+
+  const saveHistory=()=>setHistory(p=>[...p.slice(-20),JSON.stringify(qs)]);
+  const undo=()=>{if(!history.length)return;const prev=JSON.parse(history[history.length-1]);setQs(prev);setHistory(p=>p.slice(0,-1));if(prev.length)setShow(true);};
+
+  const handleDrop=(toIdx)=>{
+    if(dragIdx===null||dragIdx===toIdx)return;
+    saveHistory();
+    const n=[...qs];const item=n.splice(dragIdx,1)[0];n.splice(toIdx,0,item);setQs(n);
+    setDragIdx(null);setOverIdx(null);
+  };
+
+  const insertAt=(i)=>{
+    if(!clipboard||clipboard.target!==2)return;
+    const n=[...qs];n.splice(i,0,clipboard.text);setQs(n);clearClip();setShow(true);
+  };
+
+  // Panoda formül varsa sona ekle
+  useEffect(()=>{
+    if(clipboard&&clipboard.target===2){
+      saveHistory();setQs(p=>[...p,clipboard.text]);clearClip();setShow(true);
+    }
+  },[clipboard]);
+
+  // Tara ve direkt sona ekle
+  const scan=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
+    try{for(const file of files){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
+      const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);
+      const j=parseJ(raw);if(j.questions?.length){setQs(p=>[...p,...j.questions]);setShow(true);}
+    }}catch(ex){setErr(ex.message==="Failed to fetch"?"Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.":ex.message);}setBusy(false);};
+
+  // Tara → Kitap sayfası (AI düzenler)
+  const scanBook=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
+    try{for(const file of files){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
+      const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_BOOK}]);
+      const j=parseJ(raw);if(j.questions?.length){saveHistory();setQs(p=>[...p,...j.questions]);setShow(true);setTpl("konu");}
+    }}catch(ex){setErr(ex.message==="Failed to fetch"?"Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.":ex.message);}setBusy(false);};
+
+  // Tara ve panoya al (istediğin yere yapıştır)
+  const scanToClip=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
+    try{
+      const file=files[0];
+      const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
+      const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);
+      const j=parseJ(raw);
+      if(j.questions?.length){
+        setClip({text:j.questions[0],target:2});
+      }
+    }catch(ex){setErr(ex.message);}setBusy(false);
+  };;
+
+  const addTxt=()=>{const ls=txt.split("\n").map(l=>l.trim()).filter(Boolean);if(ls.length){saveHistory();setQs(p=>[...p,...ls]);setTxt("");setShow(true);}};
+  
+  // AI şekil üretme
+  const generateShape=async()=>{
+    if(!shapeDesc.trim())return;setShapeLoading(true);
+    try{
+      const raw=await callAI([{type:"text",text:`Geometri şekli çiz. SVG kodu üret. viewBox="0 0 240 180". stroke="#333" stroke-width="1.5". Yazılar font-size="12" fill="#333". Noktalar r="2.5" fill="#333".
+
+Açıklama: ${shapeDesc}
+
+SADECE SVG kodu döndür, başka hiçbir şey yazma. <svg> ile başla </svg> ile bitir.`}]);
+      const svgMatch=raw.match(/<svg[\s\S]*?<\/svg>/i);
+      if(svgMatch){
+        saveHistory();
+        setQs(p=>[...p,shapeDesc+'<div class="qsvg">'+svgMatch[0]+'</div>']);
+        setShapeDesc("");setShow(true);
+      }
+    }catch(e){setErr(e.message);}
+    setShapeLoading(false);
+  };
+
+  // Fonksiyon grafik çizme (matematiksel hesaplama, AI değil)
+  const delQ=(i)=>{saveHistory();const n=[...qs];n.splice(i,1);setQs(n);if(!n.length)setShow(false);};
+  const copyQ=(i)=>{saveHistory();const n=[...qs];n.splice(i+1,0,qs[i]);setQs(n);};
+  const[converting,setConverting]=useState(null);
+  const reconvert=async(i)=>{
+    setConverting(i);
+    try{
+      const raw=await callAI([{type:"text",text:PROMPT_SCAN+"\n\nBu soruyu düzelt ve yeniden çevir:\n"+qs[i]}]);
+      const j=parseJ(raw);
+      if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}
+    }catch(e){}
+    setConverting(null);
+  };
+  const scanImg=async(e)=>{
+    const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";
+    if(!files.length)return;setCleaning(true);
+    for(const file of files){
+      try{
+        const cleaned=await cleanImage(file);
+        saveHistory();
+        const imgHtml='<img src="'+cleaned+'" style="max-width:100%;height:auto"/>';
+        setQs(p=>[...p,imgHtml]);
+        setShow(true);
+      }catch(err){
+        // cleanImage hata verirse direkt dataURL ile ekle
+        const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file);});
+        saveHistory();
+        setQs(p=>[...p,'<img src="'+du+'" style="max-width:100%;height:auto"/>']);
+        setShow(true);
+      }
+    }
+    setCleaning(false);
+  };
+  const convertImgToText=async(i)=>{
+    const q=qs[i];if(!q||!q.includes('<img'))return;setConverting(i);
+    try{const src=q.match(/src="([^"]+)"/)?.[1];
+      if(src){const b=src.split(",")[1],m=src.match(/^data:(image\/\w+);/)?.[1]||"image/png";
+        const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);
+        const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}
+    }catch(e){}setConverting(null);
+  };
+  const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn{display:none!important}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
+  const print=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu+" - "+cfg.alt));w.document.close();setTimeout(()=>w.print(),500);};
+  const savePDF=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml((cfg.konu||"MathStudio")+"_"+(cfg.alt||"Test")));w.document.close();setTimeout(()=>w.print(),500);};
+
+  return(<div className="sc">
+    <div className="bx2"><b className="bt2">📷 Soru Ekle</b>
+      <div className="scan-btns">
+        <label className={`bup${busy?" wait":""}`}>{busy?"⏳ Çevriliyor...":"📷 Tara → Metin"}<span className="bup-desc">Soruları metin olarak çevirir</span><input type="file" accept="image/*" multiple hidden disabled={busy} onChange={scan}/></label>
+        <label className={`bup bup4${busy?" wait":""}`}>{busy?"⏳ Düzenleniyor...":"📖 Tara → Kitap Sayfası"}<span className="bup-desc">Konu anlatımını kitap formatında düzenler</span><input type="file" accept="image/*" multiple hidden disabled={busy} onChange={scanBook}/></label>
+        <label className={`bup bup3${cleaning?" wait":""}`}>{cleaning?"⏳ Temizleniyor...":"🖼️ Resim Ekle"}<span className="bup-desc">Resim olarak ekler (arka plan temizle)</span><input type="file" accept="image/*" multiple hidden disabled={cleaning} onChange={scanImg}/></label>
+      </div>
+      {busy&&<div className="ld"><div className="lds"/>Sorular okunuyor...</div>}
+      {cleaning&&<div className="ld"><div className="lds"/>Arka plan temizleniyor...</div>}
+      {err&&<div className="er">⚠️ {err}</div>}
+    </div>
+    <div className="bx2"><b className="bt2">📝 Elle Ekle</b>
+      <div className="stabs" style={{marginBottom:8}}>
+        <button className={`st${addMode==="text"?" on":""}`} onClick={()=>setAddMode("text")}>✏️ Metin</button>
+        <button className={`st${addMode==="shape"?" on":""}`} onClick={()=>setAddMode("shape")}>🔷 Şekil</button>
+        <button className={`st${addMode==="graph"?" on":""}`} onClick={()=>setAddMode("graph")}>📈 Grafik</button>
+      </div>
+
+      {addMode==="text"&&<div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
+        <textarea className="ta" value={txt} onChange={e=>setTxt(e.target.value)} rows={2} placeholder="Düz metin soru yazın..." style={{flex:1}}/>
+        <button className="bp" onClick={addTxt} disabled={!txt.trim()} style={{marginTop:2}}>Ekle</button>
+      </div>}
+
+      {addMode==="shape"&&<div>
+        <p className="ht2">Serbest çizim yapın veya açıklama yazıp AI'ya çizdirin.</p>
+        <Canvas onAddAsImage={(dataUrl)=>{saveHistory();setQs(p=>[...p,'<img src="'+dataUrl+'" style="max-width:100%;height:auto"/>']);setShow(true);}}/>
+        <div className="shp-div"><span className="shp-dvt">veya AI ile çizdirin</span></div>
+        <div className="shp-btns">
+          {[["△ Üçgen","ABC üçgeni, AB=6cm, BC=8cm, AC=10cm, köşe noktaları etiketli"],
+            ["□ Dikdörtgen","ABCD dikdörtgeni, AB=8cm, BC=5cm, köşe noktaları etiketli"],
+            ["○ Daire","Merkezi O, yarıçapı r=4cm olan daire, merkez ve yarıçap etiketli"],
+            ["◇ Paralelkenar","ABCD paralelkenarı, AB=7cm, BC=5cm, açı A=60°"],
+            ["📐 Dik Üçgen","ABC dik üçgeni, dik açı C'de, AC=3cm, BC=4cm, hipotenüs AB=5cm"],
+            ["⊿ Koordinat","Koordinat düzlemi, x ekseni -4 ile 4 arası, y ekseni -3 ile 3 arası, ızgara çizgileri"]
+          ].map(([label,desc])=><button key={label} className="shp-b" onClick={()=>setShapeDesc(desc)}>{label}</button>)}
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"flex-start",marginTop:6}}>
+          <textarea className="ta" value={shapeDesc} onChange={e=>setShapeDesc(e.target.value)} rows={2} placeholder="Şekil açıklaması yazın..." style={{flex:1}}/>
+          <button className="bp" onClick={generateShape} disabled={!shapeDesc.trim()||shapeLoading} style={{marginTop:2}}>{shapeLoading?"⏳":"🔷 Çiz"}</button>
+        </div>
+        {shapeLoading&&<div className="ld"><div className="lds"/>Şekil çiziliyor...</div>}
+      </div>}
+
+      {addMode==="graph"&&<div>
+        <p className="ht2">Fonksiyonları yazın. Üslü için ^ kullanabilirsiniz (x^2). Birden fazla fonksiyon ekleyip karşılaştırabilirsiniz.</p>
+        {graphFns.map((g,i)=><div key={i} className="grp-fn">
+          <span className="grp-dot" style={{background:g.color}}/>
+          <span className="grp-fl">{g.label} =</span>
+          <input className="ta grp-inp" value={g.fn} onChange={e=>updateGraphFn(i,"fn",e.target.value)} placeholder="x^2-4*x+3"/>
+          {graphFns.length>1&&<button className="grp-del" onClick={()=>removeGraphFn(i)}>✕</button>}
+        </div>)}
+        {graphFns.length<5&&<button className="grp-add" onClick={addGraphFn}>+ Fonksiyon ekle</button>}
+        <div className="grp-row">
+          <div className="grp-r"><label className="grp-l">x min</label><input className="ta grp-sm" type="number" value={graphXmin} onChange={e=>setGraphXmin(e.target.value)}/></div>
+          <div className="grp-r"><label className="grp-l">x max</label><input className="ta grp-sm" type="number" value={graphXmax} onChange={e=>setGraphXmax(e.target.value)}/></div>
+          <div className="grp-r"><label className="grp-l">y min</label><input className="ta grp-sm" value={graphYmin} onChange={e=>setGraphYmin(e.target.value)} placeholder="auto"/></div>
+          <div className="grp-r"><label className="grp-l">y max</label><input className="ta grp-sm" value={graphYmax} onChange={e=>setGraphYmax(e.target.value)} placeholder="auto"/></div>
+          <button className="bp" onClick={generateGraph} style={{marginTop:14}}>📈 Çiz</button>
+        </div>
+        <div className="grp-opts">
+          <label className="cb-chk"><input type="checkbox" checked={graphGrid} onChange={e=>setGraphGrid(e.target.checked)}/>Izgara</label>
+          <label className="cb-chk"><input type="checkbox" checked={graphNums} onChange={e=>setGraphNums(e.target.checked)}/>Rakamlar</label>
+          <label className="cb-chk"><input type="checkbox" checked={graphRoots} onChange={e=>setGraphRoots(e.target.checked)}/>Kökler</label>
+          <span className="grp-el">Boyut:</span>
+          {[240,320,400].map(s=><button key={s} className={`grp-eb${graphSize===s?" grp-eb-on":""}`} onClick={()=>setGraphSize(s)}>{s}</button>)}
+        </div>
+        <div className="grp-ex">
+          <span className="grp-el">Örnekler:</span>
+          {[["x²","x^2"],["x³-3x","x^3-3*x"],["sin(x)","Math.sin(x)"],["cos(x)","Math.cos(x)"],["√x","Math.sqrt(x)"],["1/x","1/x"],["eˣ","Math.exp(x)"],["ln(x)","Math.log(x)"],["|x|","Math.abs(x)"],["tan(x)","Math.tan(x)"]].map(([label,fn])=>
+            <button key={label} className="grp-eb" onClick={()=>updateGraphFn(0,"fn",fn)}>{label}</button>
+          )}
+        </div>
+      </div>}
+    </div>
+    {qs.length===0&&<div className="empty-msg">
+      <div className="empty-icon">📄</div>
+      <div className="empty-title">Henüz soru eklenmedi</div>
+      <div className="empty-desc">Yukarıdaki butonlarla soru ekleyin: fotoğraf tarayın, resim ekleyin veya elle yazın.</div>
+    </div>}
+    {qs.length>0&&<>
+      <div className="bx2"><b className="bt2">📋 Sorular ({qs.length}) <button className="bxx" onClick={()=>{saveHistory();setQs([]);setShow(false);try{window.storage?.delete("mathstudio-s2");}catch(e){}}}>Tümünü Sil</button>{history.length>0&&<button className="bundo" onClick={undo}>↩ Geri Al</button>}</b>
+        <div className="ql">
+          {clipboard&&clipboard.target===2&&<button className="qins" onClick={()=>insertAt(0)}>📥 En başa ekle</button>}
+          {qs.map((q,i)=><div key={`q${i}`}>
+            <QItem index={i} html={q} onUpdate={(val)=>{const n=[...qs];n[i]=val;setQs(n);}} onDelete={()=>delQ(i)} onCopy={()=>copyQ(i)}
+              onReconvert={typeof q==='string'&&q.includes('<img')?()=>convertImgToText(i):()=>reconvert(i)} reconverting={converting===i}
+              onDragStart={setDragIdx} onDragOver={setOverIdx} onDrop={handleDrop} dragging={overIdx===i&&dragIdx!==i}/>
+            {clipboard&&clipboard.target===2&&<button className="qins" onClick={()=>insertAt(i+1)}>📥 Buraya ekle</button>}
+          </div>)}
+        </div>
+      </div>
+      <div className="bx2"><b className="bt2">📐 Düzen</b><Settings tpl={tpl} setTpl={setTpl} cols={cols} setCols={setCols} cfg={cfg} uc={uc} onAddOpts={(dir,cnt)=>{
+        const lt=["A","B","C","D","E"].slice(0,cnt);
+        const oh=dir==="row"?'<div class="qo-r">'+lt.map(l=>`<span class="qo-i">${l})</span>`).join("")+'</div>':'<div class="qo-c">'+lt.map(l=>`<div class="qo-i">${l})</div>`).join("")+'</div>';
+        setQs(qs.map(q=>q+oh));
+      }}/>
+        <div className="pa">
+          <FontPick v={font} set={setFont}/>
+          <span className="pa-sep"/>
+          <button className="bp" onClick={()=>setShow(!show)}>{show?"Gizle":"👁️ Önizle"}</button>
+          {show&&<button className="bo" onClick={print}>🖨️ Yazdır</button>}
+          {show&&<button className="bo bo-pdf" onClick={savePDF}>📥 PDF</button>}
+          <span className="pa-sep"/>
+          <label className="pa-pp">Sayfa başına <select value={perPage} onChange={e=>setPerPage(+e.target.value)}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option><option value={12}>12</option><option value={15}>15</option><option value={20}>20</option><option value={999}>Tümü</option></select> soru</label>
+          <span className="pa-sep"/>
+          <div className="pa-sz"><button className="rsb" onClick={()=>setQSize(s=>Math.max(8,s-0.5))}>A−</button><span className="rst">{qSize}pt</span><button className="rsb" onClick={()=>setQSize(s=>Math.min(16,s+0.5))}>A+</button></div>
+        </div>
+      </div>
+      {show&&<div className="pw" ref={pvRef} onClick={e=>{
+        const box=e.target.closest('.ebox,.bk-box,.bk-example,.bk-solve');
+        if(box){
+          const rect=box.getBoundingClientRect();
+          const x=e.clientX-rect.left,y=e.clientY-rect.top;
+          if(x>rect.width-60&&y<22){
+            box.parentNode.removeChild(box);
+          }
+        }
+      }}>
+        <EditorToolbar pvRef={pvRef}/>
+        {Array.from({length:Math.ceil(qs.length/perPage)}).map((_,pi)=>{
+          const pageQs=qs.slice(pi*perPage,(pi+1)*perPage);
+          const tp=Math.ceil(qs.length/perPage);
+          return <div key={pi} className="pw-page">{pi>0&&<div className="pw-break"/>}<Page qs={pageQs} tpl={tpl} cols={cols} cfg={cfg} ff={ff} pageNum={pi+1} totalPages={tp} startNum={pi*perPage+1} qSize={qSize} spacings={spacings} imgSizes={imgSizes} imgOffsets={imgOffsets} onUpdateImgSize={(idx,val)=>{const ri=pi*perPage+idx;setImgSizes(s=>({...s,[ri]:val}));}} onUpdateImgOffset={(idx,val)=>{const ri=pi*perPage+idx;setImgOffsets(s=>({...s,[ri]:val}));}} onUpdateSpacing={(idx,val)=>{const ri=pi*perPage+idx;setSpacings(s=>({...s,[ri]:val}));}} onUpdateQ={(idx,html)=>{const ri=pi*perPage+idx;const n=[...qs];n[ri]=html;setQs(n);}}/></div>;
+        })}
+      </div>}
+    </>}
+  </div>);
+}
+
+/* ═══ Image cleaner - adaptive background removal ═══ */
+function cleanImage(file){
+  return new Promise(async(resolve)=>{
+    try{
+      const bitmap=await createImageBitmap(file);
+      const cv=document.createElement("canvas");
+      cv.width=bitmap.width;cv.height=bitmap.height;
+      const ctx=cv.getContext("2d",{willReadFrequently:true});
+      ctx.drawImage(bitmap,0,0);
+      const imgData=ctx.getImageData(0,0,cv.width,cv.height);
+      const d=imgData.data;
+      const total=d.length/4;
+      
+      // Step 1: Find the background color (most common light color)
+      // Sample corners and edges to detect paper color
+      const w=cv.width,h=cv.height;
+      let bgR=0,bgG=0,bgB=0,bgCount=0;
+      const sample=(x,y)=>{
+        const i=(y*w+x)*4;
+        const g=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+        if(g>120){bgR+=d[i];bgG+=d[i+1];bgB+=d[i+2];bgCount++;}
+      };
+      // Sample edges
+      for(let x=0;x<w;x+=3){sample(x,0);sample(x,h-1);sample(x,Math.floor(h/2));}
+      for(let y=0;y<h;y+=3){sample(0,y);sample(w-1,y);}
+      
+      if(bgCount>0){bgR=bgR/bgCount;bgG=bgG/bgCount;bgB=bgB/bgCount;}
+      else{bgR=230;bgG=230;bgB=230;}
+      
+      const bgGray=bgR*0.299+bgG*0.587+bgB*0.114;
+      // Threshold = midpoint between background and pure black
+      const thresh=bgGray*0.65;
+      
+      // Step 2: Process each pixel
+      for(let i=0;i<d.length;i+=4){
+        const r=d[i],g=d[i+1],b=d[i+2];
+        const gray=r*0.299+g*0.587+b*0.114;
+        
+        // How close is this pixel to the background color?
+        const diffR=Math.abs(r-bgR);
+        const diffG=Math.abs(g-bgG);
+        const diffB=Math.abs(b-bgB);
+        const bgDist=Math.sqrt(diffR*diffR+diffG*diffG+diffB*diffB);
+        
+        if(bgDist<80){
+          // Very close to background → pure white
+          d[i]=255;d[i+1]=255;d[i+2]=255;
+        }else if(gray>thresh){
+          // Lighter than threshold but not background → fade to white
+          const fade=Math.min(1,(gray-thresh)/(bgGray-thresh));
+          d[i]=Math.round(r+(255-r)*fade);
+          d[i+1]=Math.round(g+(255-g)*fade);
+          d[i+2]=Math.round(b+(255-b)*fade);
+        }
+        // Dark pixels stay as they are
+        d[i+3]=255;
+      }
+      
+      // Step 3: Clean edges - very generous border cleaning
+      const edgeX=Math.max(30,Math.round(w*0.07));
+      const edgeY=Math.max(25,Math.round(h*0.05));
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          if(x<edgeX||x>=w-edgeX||y<edgeY||y>=h-edgeY){
+            const i=(y*w+x)*4;
+            d[i]=255;d[i+1]=255;d[i+2]=255;d[i+3]=255;
+          }
+        }
+      }
+      
+      // Step 3.5: Corner cleaning - wipe ALL corners aggressively
+      const cr=Math.max(120,Math.round(Math.min(w,h)*0.25));
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const inCorner=(
+            (x<cr&&y<cr)||(x>=w-cr&&y<cr)||
+            (x<cr&&y>=h-cr)||(x>=w-cr&&y>=h-cr)
+          );
+          if(inCorner){
+            const i=(y*w+x)*4;
+            d[i]=255;d[i+1]=255;d[i+2]=255;d[i+3]=255;
+          }
+        }
+      }
+      
+      // Step 4: Flood fill from edges - any dark pixel touching the border gets removed
+      const isWhite=(i)=>d[i]===255&&d[i+1]===255&&d[i+2]===255;
+      const makeWhite=(i)=>{d[i]=255;d[i+1]=255;d[i+2]=255;d[i+3]=255;};
+      const gray=(i)=>d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+      
+      // Scan left edge inward - remove dark strips
+      for(let y=0;y<h;y++){
+        for(let x=0;x<Math.min(w*0.15,80);x++){
+          const i=(y*w+x)*4;
+          if(gray(i)>bgGray*0.5) break; // hit actual content, stop
+          makeWhite(i);
+        }
+      }
+      // Scan right edge inward
+      for(let y=0;y<h;y++){
+        for(let x=w-1;x>Math.max(w*0.85,w-80);x--){
+          const i=(y*w+x)*4;
+          if(gray(i)>bgGray*0.5) break;
+          makeWhite(i);
+        }
+      }
+      // Scan top edge inward
+      for(let x=0;x<w;x++){
+        for(let y=0;y<Math.min(h*0.1,50);y++){
+          const i=(y*w+x)*4;
+          if(gray(i)>bgGray*0.5) break;
+          makeWhite(i);
+        }
+      }
+      // Scan bottom edge inward
+      for(let x=0;x<w;x++){
+        for(let y=h-1;y>Math.max(h*0.9,h-50);y--){
+          const i=(y*w+x)*4;
+          if(gray(i)>bgGray*0.5) break;
+          makeWhite(i);
+        }
+      }
+      
+      ctx.putImageData(imgData,0,0);
+      resolve(cv.toDataURL("image/png"));
+    }catch(e){
+      const r=new FileReader();
+      r.onload=()=>resolve(r.result);
+      r.readAsDataURL(file);
+    }
+  });
+}
+
+/* ═══ Shared ═══ */
+function Settings({tpl,setTpl,cols,setCols,cfg,uc,onAddOpts}){
+  return(<div className="lay">
+    <div className="lr"><span className="ll">Şablon</span><div className="lg" style={{flexWrap:"wrap"}}>
+      {[["yaprak","Yaprak Test"],["sinav","Sınav"],["ders","Ders Kitabı"],["duz","Düzenli"],["konu","📖 Konu Anlatım"],["teorem","📐 Teorem"],["ornek","✏️ Çözümlü Örnek"],["ozet","📋 Özet"]].map(([id,nm])=><button key={id} className={`lb${tpl===id?" on":""}`} onClick={()=>setTpl(id)}>{nm}</button>)}
+    </div></div>
+    <div className="lr"><span className="ll">Sütun</span><div className="lg">{[1,2,3].map(n=><button key={n} className={`lb lsm${cols===n?" on":""}`} onClick={()=>setCols(n)}>{n}</button>)}</div></div>
+    <div className="lr"><span className="ll">Numara</span><div className="lg">
+      {[["circle","●1"],["square","■1"],["plain","1)"],["dot","1."],["paren","(1)"],["dash","1-"],["none","—"]].map(([id,label])=>
+        <button key={id} className={`lb lsm${(cfg.numStyle||"circle")===id?" on":""}`} onClick={()=>uc("numStyle",id)}>{label}</button>
+      )}
+    </div></div>
+    {onAddOpts&&<div className="lr"><span className="ll">Şıklar</span><div className="lg">
+      <button className="lb" onClick={()=>onAddOpts("row",4)}>A-D ⟶</button>
+      <button className="lb" onClick={()=>onAddOpts("row",5)}>A-E ⟶</button>
+      <button className="lb" onClick={()=>onAddOpts("col",4)}>A-D ↓</button>
+      <button className="lb" onClick={()=>onAddOpts("col",5)}>A-E ↓</button>
+    </div></div>}
+    {tpl==="yaprak"&&<div className="lr lf"><input placeholder="Konu" value={cfg.konu} onChange={e=>uc("konu",e.target.value)}/><input placeholder="Alt başlık" value={cfg.alt} onChange={e=>uc("alt",e.target.value)}/><input placeholder="No" value={cfg.no} onChange={e=>uc("no",e.target.value)} className="sm"/><label className="lchk"><input type="checkbox" checked={cfg.showInfo!==false} onChange={e=>uc("showInfo",e.target.checked)}/> Ad Soyad / D-Y-B</label><label className="lchk"><input type="checkbox" checked={cfg.showCevap!==false} onChange={e=>uc("showCevap",e.target.checked)}/> Cevap Anahtarı</label></div>}
+    {tpl==="sinav"&&<div className="lr lf"><input placeholder="Okul" value={cfg.okul} onChange={e=>uc("okul",e.target.value)}/><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Süre" value={cfg.sure} onChange={e=>uc("sure",e.target.value)} className="sm"/></div>}
+    {tpl==="ders"&&<div className="lr lf"><input placeholder="Ünite" value={cfg.unite} onChange={e=>uc("unite",e.target.value)}/><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/></div>}
+    {tpl==="duz"&&<div className="lr lf"><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/></div>}
+    {tpl==="konu"&&<div className="lr lf"><input placeholder="Ünite" value={cfg.unite} onChange={e=>uc("unite",e.target.value)}/><input placeholder="Konu Başlığı" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
+    {tpl==="teorem"&&<div className="lr lf"><input placeholder="Teorem/Kural Adı" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
+    {tpl==="ornek"&&<div className="lr lf"><input placeholder="Örnek Başlığı" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
+    {tpl==="ozet"&&<div className="lr lf"><input placeholder="Ünite" value={cfg.unite} onChange={e=>uc("unite",e.target.value)}/><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
+    <div className="lr lf"><input placeholder="Sütun arası dikey yazı (okul/kurum adı)" value={cfg.divText||""} onChange={e=>uc("divText",e.target.value)}/></div>
+  </div>);
+}
+
+/* ═══ Floating Editor Toolbar — metin seçip boyut/stil değiştirme ═══ */
+function EditorToolbar({pvRef}){
+  const applySize=(size)=>{
+    const sel=window.getSelection();
+    if(!sel||sel.isCollapsed||!sel.rangeCount)return;
+    const range=sel.getRangeAt(0);
+    const span=document.createElement("span");
+    span.style.fontSize=size;
+    try{range.surroundContents(span);}catch(e){
+      try{const frag=range.extractContents();span.appendChild(frag);range.insertNode(span);}catch(e2){}
+    }
+    sel.removeAllRanges();
+  };
+  const applyStyle=(prop,val)=>{
+    const sel=window.getSelection();
+    if(!sel||sel.isCollapsed||!sel.rangeCount)return;
+    const range=sel.getRangeAt(0);
+    const span=document.createElement("span");
+    span.style[prop]=val;
+    try{range.surroundContents(span);}catch(e){
+      try{const frag=range.extractContents();span.appendChild(frag);range.insertNode(span);}catch(e2){}
+    }
+    sel.removeAllRanges();
+  };
+  const wrapBox=(className)=>{
+    const sel=window.getSelection();
+    if(!sel||sel.isCollapsed||!sel.rangeCount)return;
+    const range=sel.getRangeAt(0);
+    const div=document.createElement("div");
+    div.className=className;
+    try{range.surroundContents(div);}catch(e){
+      try{const frag=range.extractContents();div.appendChild(frag);range.insertNode(div);}catch(e2){}
+    }
+    sel.removeAllRanges();
+  };
+  const insertBox=(className,placeholder)=>{
+    const sel=window.getSelection();
+    if(!sel||!sel.rangeCount)return;
+    const range=sel.getRangeAt(0);
+    const div=document.createElement("div");
+    div.className=className;
+    div.innerHTML=placeholder;
+    div.contentEditable="true";
+    range.collapse(false);
+    range.insertNode(div);
+    sel.removeAllRanges();
+  };
+  // Kutu/vurgu kaldır — seçili metnin etrafındaki kutuyu siler, içerik kalır
+  const removeFormat=()=>{
+    const sel=window.getSelection();
+    if(!sel||!sel.rangeCount)return;
+    const node=sel.anchorNode?.parentElement;
+    if(!node)return;
+    // En yakın ebox veya span bul
+    const box=node.closest('.ebox')||node.closest('span[style]');
+    if(box){
+      const parent=box.parentNode;
+      while(box.firstChild)parent.insertBefore(box.firstChild,box);
+      parent.removeChild(box);
+    }
+  };
+  const prevent=(e)=>e.preventDefault();
+  return(
+    <div className="etb" onMouseDown={prevent}>
+      <button className="etb-b etb-ud" onMouseDown={prevent} onClick={()=>{document.execCommand('undo');}} title="Geri al">↩</button>
+      <button className="etb-b etb-ud" onMouseDown={prevent} onClick={()=>{document.execCommand('redo');}} title="İleri al">↪</button>
+      <button className="etb-b etb-ud" onMouseDown={prevent} onClick={removeFormat} title="Kutu/vurgu kaldır">✂️</button>
+      <div className="etb-sep"/>
+      <span className="etb-l">Metin:</span>
+      {[8,9,10,11,12,14].map(s=><button key={s} className={`etb-b${s===11?" etb-on":""}`} onMouseDown={prevent} onClick={()=>applySize(s+'pt')}>{s}</button>)}
+      <div className="etb-sep"/>
+      <button className="etb-b etb-f" onMouseDown={prevent} onClick={()=>applyStyle('fontWeight','bold')} title="Kalın"><b>B</b></button>
+      <button className="etb-b etb-f" onMouseDown={prevent} onClick={()=>applyStyle('fontStyle','italic')} title="İtalik"><i>I</i></button>
+      <button className="etb-b etb-f" onMouseDown={prevent} onClick={()=>applyStyle('textDecoration','underline')} title="Altı çizili"><u>U</u></button>
+      <div className="etb-sep"/>
+      <button className="etb-b etb-c" onMouseDown={prevent} onClick={()=>applyStyle('color','#c00')} title="Kırmızı">🔴</button>
+      <button className="etb-b etb-c" onMouseDown={prevent} onClick={()=>applyStyle('color','#2563eb')} title="Mavi">🔵</button>
+      <button className="etb-b etb-c" onMouseDown={prevent} onClick={()=>applyStyle('color','#1a1a1a')} title="Siyah">⚫</button>
+      <div className="etb-sep"/>
+      <span className="etb-l">Vurgu:</span>
+      <button className="etb-b etb-h" onMouseDown={prevent} onClick={()=>applyStyle('backgroundColor','#fef3c7')} title="Sarı vurgu" style={{background:'#fef3c7'}}>H</button>
+      <button className="etb-b etb-h" onMouseDown={prevent} onClick={()=>applyStyle('backgroundColor','#dbeafe')} title="Mavi vurgu" style={{background:'#dbeafe'}}>H</button>
+      <button className="etb-b etb-h" onMouseDown={prevent} onClick={()=>applyStyle('backgroundColor','#dcfce7')} title="Yeşil vurgu" style={{background:'#dcfce7'}}>H</button>
+      <button className="etb-b etb-h" onMouseDown={prevent} onClick={()=>applyStyle('backgroundColor','#fde0e0')} title="Kırmızı vurgu" style={{background:'#fde0e0'}}>H</button>
+      <div className="etb-sep"/>
+      <span className="etb-l">Kutu:</span>
+      <button className="etb-b etb-bx" onMouseDown={prevent} onClick={()=>wrapBox('ebox ebox-blue')} title="Mavi kutu">📘</button>
+      <button className="etb-b etb-bx" onMouseDown={prevent} onClick={()=>wrapBox('ebox ebox-green')} title="Yeşil kutu">📗</button>
+      <button className="etb-b etb-bx" onMouseDown={prevent} onClick={()=>wrapBox('ebox ebox-orange')} title="Turuncu kutu">📙</button>
+      <button className="etb-b etb-bx" onMouseDown={prevent} onClick={()=>wrapBox('ebox ebox-red')} title="Kırmızı kutu">📕</button>
+      <div className="etb-sep"/>
+      <span className="etb-l">Ekle:</span>
+      <button className="etb-b etb-ins" onMouseDown={prevent} onClick={()=>insertBox('ebox ebox-def','<b>TANIM:</b> Tanım metnini buraya yazın...')} title="Tanım kutusu">📝Tanım</button>
+      <button className="etb-b etb-ins" onMouseDown={prevent} onClick={()=>insertBox('ebox ebox-thm','<b>TEOREM:</b> Teorem metnini buraya yazın...')} title="Teorem kutusu">📐Teorem</button>
+      <button className="etb-b etb-ins" onMouseDown={prevent} onClick={()=>insertBox('ebox ebox-warn','<b>DİKKAT:</b> Önemli notu buraya yazın...')} title="Dikkat kutusu">⚠️Dikkat</button>
+      <button className="etb-b etb-ins" onMouseDown={prevent} onClick={()=>insertBox('ebox ebox-tip','<b>İPUCU:</b> İpucu metnini buraya yazın...')} title="İpucu kutusu">💡İpucu</button>
+      <div className="etb-sep"/>
+      <span className="etb-l">Kitap:</span>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-box bk-def')} title="Seçili metni tanım kutusuna al">📘Tanım</button>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-box bk-thm')} title="Seçili metni teorem kutusuna al">📐Teorem</button>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-box bk-prop')} title="Seçili metni özellik kutusuna al">📗Özellik</button>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-box bk-warn')} title="Seçili metni dikkat kutusuna al">⚠️Dikkat</button>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-box bk-tip')} title="Seçili metni ipucu kutusuna al">💡İpucu</button>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-example')} title="Seçili metni örnek kutusuna al">✏️Örnek</button>
+      <button className="etb-b etb-ins etb-bk" onMouseDown={prevent} onClick={()=>wrapBox('bk-solve')} title="Seçili metni çözüm kutusuna al">✅Çözüm</button>
+    </div>
+  );
+}
+
+function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,spacings,onUpdateSpacing,imgSizes,onUpdateImgSize,imgOffsets,onUpdateImgOffset}){
+  const sn=startNum||1;
+  const fs=qSize||11;
+  const per=Math.ceil(qs.length/cols);
+  const gs=[];for(let i=0;i<cols;i++)gs.push(qs.slice(i*per,(i+1)*per).map((q,qi)=>({q,n:sn+i*per+qi,idx:i*per+qi})));
+  return(<div className={`A4 T${tpl}${cfg.stretch?" A4-stretch":""}`} ref={r} style={{fontFamily:ff,fontSize:fs+'pt'}}>
+    {tpl==="yaprak"&&<><div className="Hbar"><div className="Hbl"><div className="Hbk HbkE" contentEditable suppressContentEditableWarning>{cfg.konu||"MATEMATİK"}</div><div className="Hba HbaE" contentEditable suppressContentEditableWarning>{cfg.alt||"Konu Testi"}</div></div><div className="Hbr"><div className="Hbt">TEST</div><div className="Hbn">{cfg.no||"01"}</div></div></div>{cfg.showInfo!==false&&<div className="Hinf HinfE" contentEditable suppressContentEditableWarning>Ad Soyad: ...............................................................     D: .........  Y: .........  B: .........</div>}</>}
+    {tpl==="sinav"&&<><div className="Hhd HhdE" contentEditable suppressContentEditableWarning><div className="Hok">{cfg.okul||"………… OKULU"}</div><div className="Hbs">{cfg.baslik||"MATEMATİK YAZILI SINAVI"}</div></div><div className="Hsi HsiE" contentEditable suppressContentEditableWarning>Adı Soyadı: ..............................   Sınıf/No: ....../......   Süre: {cfg.sure||"40"} dk   Soru: {qs.length}</div></>}
+    {tpl==="ders"&&<div className="Hdh"><div className="Hdu HduE" contentEditable suppressContentEditableWarning>{cfg.unite||"ÜNİTE 1"}</div><div className="Hdb HdbE" contentEditable suppressContentEditableWarning>{cfg.baslik||"ALIŞTIRMALAR"}</div><div className="Hdl"/></div>}
+    {tpl==="duz"&&cfg.baslik&&<div className="Hzh HzhE" contentEditable suppressContentEditableWarning>{cfg.baslik}</div>}
+    
+    {tpl==="konu"&&<div className="Bkh">
+      <div className="Bkh-top"><span className="Bkh-u">{cfg.unite||"ÜNİTE 1"}</span>{cfg.sayfaNo&&<span className="Bkh-pn">{cfg.sayfaNo}</span>}</div>
+      <div className="Bkh-title" contentEditable suppressContentEditableWarning>{cfg.baslik||"KONU BAŞLIĞI"}</div>
+      <div className="Bkh-line"/>
+    </div>}
+    
+    {tpl==="teorem"&&<div className="Bth">
+      {cfg.sayfaNo&&<div className="Bth-pn">{cfg.sayfaNo}</div>}
+      <div className="Bth-box">
+        <div className="Bth-label">TEOREM</div>
+        <div className="Bth-title" contentEditable suppressContentEditableWarning>{cfg.baslik||"Pisagor Teoremi"}</div>
+      </div>
+    </div>}
+    
+    {tpl==="ornek"&&<div className="Boh">
+      {cfg.sayfaNo&&<div className="Boh-pn">{cfg.sayfaNo}</div>}
+      <div className="Boh-badge">ÇÖZÜMLÜ ÖRNEK</div>
+      <div className="Boh-title" contentEditable suppressContentEditableWarning>{cfg.baslik||"Örnek 1"}</div>
+    </div>}
+    
+    {tpl==="ozet"&&<div className="Bzh">
+      <div className="Bzh-top"><span className="Bzh-u">{cfg.unite||"ÜNİTE 1"}</span>{cfg.sayfaNo&&<span className="Bzh-pn">{cfg.sayfaNo}</span>}</div>
+      <div className="Bzh-title">📋 {cfg.baslik||"ÖZET"}</div>
+      <div className="Bzh-line"/>
+    </div>}
+    <div className={`QG c${cols}`}>
+      {gs.map((g,gi)=>{
+        const items=[];
+        if(gi>0) items.push(<div key={`div${gi}`} className="QDiv">{cfg.divText?<span className="QDt">{cfg.divText}</span>:<span className="QDl"/>}</div>);
+        items.push(<div key={`col${gi}`} className="QC">{g.map(({q,n,idx})=>{
+        const ns=cfg.numStyle||"circle";
+        const numText=ns==="plain"?n+")":ns==="dot"?n+".":ns==="paren"?"("+n+")":ns==="dash"?n+" –":ns==="none"?"":String(n);
+        const numCls="QN"+(ns==="circle"?" QNcirc":ns==="square"?" QNsq":"");
+        return <div key={n} className="QI" style={{marginBottom:(spacings&&spacings[idx]!==undefined?spacings[idx]:26)+'px'}}>
+        {ns!=="none"&&<div className={numCls}>{numText}</div>}
+        <div className="QX">
+          {(typeof q==='string'&&q.includes('<img '))?<div className="QIG">
+            <img src={(q.match(/src="([^"]+)"/)||[])[1]||""} className="QIM" style={{transform:`scale(${(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)/100}) translateX(${imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0}px)`,transformOrigin:'top left'}}/>
+            {onUpdateImgSize&&<div className="QIS">
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>{const o=imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0;onUpdateImgOffset(idx,o-15);}}>◀</button>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgSize(idx,Math.max(30,(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)-10))}>🔍−</button>
+              <span className="QISt">{imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100}%</span>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgSize(idx,Math.min(200,(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)+10))}>🔍+</button>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>{const o=imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0;onUpdateImgOffset(idx,o+15);}}>▶</button>
+            </div>}
+          </div>:
+            <div className="QT QTE" contentEditable suppressContentEditableWarning
+              dangerouslySetInnerHTML={{__html:q}}
+              onBlur={e=>{if(onUpdateQ)onUpdateQ(idx,e.currentTarget.innerHTML);}}/>
+          }
+          <div className="QOA" contentEditable suppressContentEditableWarning data-ph="Seçenek eklemek için tıklayın: A) ... B) ... (yan yana veya alt alta)"/>
+          {tpl==="sinav"&&<div className="QLS"><div className="QL"/><div className="QL"/></div>}
+          {onUpdateSpacing&&<div className="QSP">
+            <button className="QSPb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateSpacing(idx,Math.max(0,(spacings&&spacings[idx]!==undefined?spacings[idx]:26)-10))}>−</button>
+            <span className="QSPt">{spacings&&spacings[idx]!==undefined?spacings[idx]:26}px</span>
+            <button className="QSPb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateSpacing(idx,Math.min(200,(spacings&&spacings[idx]!==undefined?spacings[idx]:26)+10))}>+</button>
+          </div>}
+        </div>
+      </div>})}</div>);
+        return items;
+      })}
+    </div>
+    {tpl==="yaprak"&&cfg.showCevap!==false&&<div className="CV"><div className="CVT">CEVAP ANAHTARI</div><div className="CVG">{qs.map((_,i)=><div key={i} className="CVR"><b className="CVN">{(startNum||1)+i}</b>{["A","B","C","D","E"].slice(0,cfg.opt||5).map(l=><span key={l} className="CVC">{l}</span>)}</div>)}</div></div>}
+    {tpl==="sinav"&&<div className="SF">Başarılar. <b>Puan: ..../100</b></div>}
+    {totalPages>1&&<div className="PF">Sayfa {pageNum} / {totalPages}</div>}
+  </div>);
+}
+
+/* ═══ MAIN ═══ */
+function App(){
+  const[font,setFont]=useState("stix");
+  const[tpl,setTpl]=useState("yaprak");const[cols,setCols]=useState(2);
+  const[cfg,setCfg]=useState({konu:"MATEMATİK",alt:"Konu Testi",no:"01",opt:5,okul:"",baslik:"",sure:"40",unite:"ÜNİTE 1",sayfaNo:"",numStyle:"circle",showInfo:true,showCevap:true,divText:""});
+  const uc=(k,v)=>setCfg(c=>({...c,[k]:v}));
+  const[qs,setQs]=useState([]);const[show,setShow]=useState(false);
+  const[busy,setBusy]=useState(false);const[err,setErr]=useState("");
+  const[cleaning,setCleaning]=useState(false);
+  const[qSize,setQSize]=useState(11);const[perPage,setPerPage]=useState(10);
+  const[spacings,setSpacings]=useState({});const[imgSizes,setImgSizes]=useState({});const[imgOffsets,setImgOffsets]=useState({});
+  const[history,setHistory]=useState([]);
+  const[converting,setConverting]=useState(null);
+  const[txt,setTxt]=useState("");
+  const[openSec,setOpenSec]=useState(1);
+  const[drawMode,setDrawMode]=useState(false);
+  const[uploadMode,setUploadMode]=useState(false);
+  const[uploadSub,setUploadSub]=useState("draw");
+  const[apiKey,setApiKey]=useState(GEMINI_KEY);
+  const[showKey,setShowKey]=useState(false);
+  const doSaveKey=()=>{const k=apiKey.trim();GEMINI_KEY=k;try{localStorage.setItem("ms_api_key",k);}catch(e){}setShowKey(false);setErr("");};
+  const camRef=useRef();const fileRef=useRef();
+  const pvRef=useRef();
+  const ff=(FONTS.find(f=>f.id===font)||FONTS[0]).f;
+
+  const saveHistory=()=>setHistory(p=>[...p.slice(-20),JSON.stringify(qs)]);
+  const undo=()=>{if(!history.length)return;const prev=JSON.parse(history[history.length-1]);setQs(prev);setHistory(p=>p.slice(0,-1));if(prev.length)setShow(true);};
+  const delQ=(i)=>{saveHistory();const n=[...qs];n.splice(i,1);setQs(n);if(!n.length)setShow(false);};
+  const copyQ=(i)=>{saveHistory();const n=[...qs];n.splice(i+1,0,qs[i]);setQs(n);};
+  const[dragIdx,setDragIdx]=useState(null);const[overIdx,setOverIdx]=useState(null);
+  const handleDrop=(toIdx)=>{if(dragIdx===null||dragIdx===toIdx)return;saveHistory();const n=[...qs];const item=n.splice(dragIdx,1)[0];n.splice(toIdx,0,item);setQs(n);setDragIdx(null);setOverIdx(null);};
+
+  const scan=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
+    try{for(const file of files){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
+      const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);
+      const j=parseJ(raw);if(j.questions?.length){saveHistory();setQs(p=>[...p,...j.questions]);setShow(true);}
+    }}catch(ex){setErr(ex.message==="Failed to fetch"?"Bağlantı kurulamadı.":ex.message);}setBusy(false);};
+  const scanBook=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
+    try{for(const file of files){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
+      const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_BOOK}]);
+      const j=parseJ(raw);if(j.questions?.length){saveHistory();setQs(p=>[...p,...j.questions]);setShow(true);}
+    }}catch(ex){setErr(ex.message==="Failed to fetch"?"Bağlantı kurulamadı.":ex.message);}setBusy(false);};
+  const scanImg=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setCleaning(true);
+    for(const file of files){try{const cleaned=await cleanImage(file);saveHistory();setQs(p=>[...p,'<img src="'+cleaned+'" style="max-width:100%;height:auto"/>']);setShow(true);}catch(err){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file);});saveHistory();setQs(p=>[...p,'<img src="'+du+'" style="max-width:100%;height:auto"/>']);setShow(true);}}setCleaning(false);};
+  const reconvert=async(i)=>{setConverting(i);try{const raw=await callAI([{type:"text",text:PROMPT_SCAN+"\n\nBu soruyu düzelt ve yeniden çevir:\n"+qs[i]}]);const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}catch(e){}setConverting(null);};
+  const convertImgToText=async(i)=>{const q=qs[i];if(!q||!q.includes('<img'))return;setConverting(i);try{const src=q.match(/src="([^"]+)"/)?.[1];if(src){const b=src.split(",")[1],m=src.match(/^data:(image\/\w+);/)?.[1]||"image/png";const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}}catch(e){}setConverting(null);};
+  const addTxt=()=>{const ls=txt.split("\n").map(l=>l.trim()).filter(Boolean);if(ls.length){saveHistory();setQs(p=>[...p,...ls]);setTxt("");setShow(true);}};
+  const addFromCanvas=(dataUrl)=>{saveHistory();setQs(p=>[...p,'<img src="'+dataUrl+'" style="max-width:100%;height:auto"/>']);setShow(true);setDrawMode(false);};
+  const recognizeFromCanvas=async(dataUrl)=>{setBusy(true);setErr("");try{const b=dataUrl.split(",")[1],m=dataUrl.match(/^data:(image\/\w+);/)?.[1]||"image/png";const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_FORMULA}]);const j=parseJ(raw);if(j.results?.length){saveHistory();setQs(p=>[...p,...j.results.map(r=>r.text)]);setShow(true);setDrawMode(false);}else setErr("Tanınamadı.");}catch(e){setErr(e.message==="Failed to fetch"?"Bağlantı kurulamadı.":e.message);}setBusy(false);};
+
+  const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn{display:none!important}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
+  const print=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu));w.document.close();setTimeout(()=>w.print(),500);};
+  const savePDF=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu||"MathStudio"));w.document.close();setTimeout(()=>w.print(),500);};
+
+  const Sec=({n,title,icon,children})=>(
+    <div className="acc">
+      <button className={`acc-h${openSec===n?" acc-on":""}`} onClick={()=>setOpenSec(openSec===n?0:n)}><span className="acc-i">{icon}</span><span className="acc-t">{title}</span><span className="acc-arr">{openSec===n?"▾":"▸"}</span></button>
+      {openSec===n&&<div className="acc-body">{children}</div>}
+    </div>
+  );
+
+  return(<div className="ms"><link href={GF} rel="stylesheet"/><style>{uicss()}{a4css("inherit")}{mathCSS()}</style>
+    <header className="hd"><div className="hr"><div className="hl"><div className="hi">∑</div><b className="hn">MathStudio</b></div>
+      <div className="hd-acts">
+        <button className="hd-btn" onClick={()=>setShowKey(!showKey)} style={{background:GEMINI_KEY?"#e8f5e9":"#fff0f0",color:GEMINI_KEY?"#2e7d32":"#c62828",borderColor:GEMINI_KEY?"#4caf50":"#ef9a9a"}}>{GEMINI_KEY?"🔑":"🔑 Key Gir"}</button>
+        {qs.length>0&&<><button className="hd-btn" onClick={print}>🖨️</button><button className="hd-btn" onClick={savePDF}>📥 PDF</button></>}
+      </div>
+    </div>
+    {showKey&&<div style={{padding:"12px 16px",background:"#fffde7",borderBottom:"2px solid #fdd835"}}>
+      <p style={{fontSize:11,color:"#555",marginBottom:8}}>Google AI Studio key: <a href="https://aistudio.google.com/apikey" target="_blank" style={{color:"#1565c0"}}>aistudio.google.com/apikey</a></p>
+      <div style={{display:"flex",gap:6}}>
+        <input value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="API key yapıştırın..." style={{flex:1,padding:"10px",border:"2px solid #bbb",borderRadius:8,fontFamily:"monospace",fontSize:13}}/>
+        <button onClick={doSaveKey} style={{padding:"10px 20px",background:"#1b2a4a",color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer",fontSize:13}}>Kaydet</button>
+      </div>
+      {GEMINI_KEY&&<p style={{fontSize:11,color:"#2e7d32",marginTop:6}}>✅ Key aktif</p>}
+    </div>}
+    </header>
+    <main className="mn2">
+      <div className="panel">
+        <Sec n={1} title="Döküman Şablonu" icon="📋">
+          <div className="p-grid">
+            {[["yaprak","📝","Yaprak Test"],["sinav","📄","Sınav Kağıdı"],["konu","📖","Ders Notu"],["kitap","📚","Kitap Sayfası"]].map(([id,ic,nm])=>
+              <button key={id} className={`p-card${tpl===id?" p-on":""}`} onClick={()=>setTpl(id)}><span className="p-ic">{ic}</span><span className="p-nm">{nm}</span></button>
+            )}
+          </div>
+        </Sec>
+        <Sec n={2} title="Döküman Bilgileri" icon="📝">
+          {tpl==="yaprak"&&<div className="p-form">
+            <input placeholder="Konu (MATEMATİK)" value={cfg.konu} onChange={e=>uc("konu",e.target.value)}/>
+            <input placeholder="Alt başlık (Konu Testi)" value={cfg.alt} onChange={e=>uc("alt",e.target.value)}/>
+            <input placeholder="Test No" value={cfg.no} onChange={e=>uc("no",e.target.value)} className="sm"/>
+            <label className="p-chk"><input type="checkbox" checked={cfg.showInfo!==false} onChange={e=>uc("showInfo",e.target.checked)}/> Ad Soyad / D-Y-B</label>
+            <label className="p-chk"><input type="checkbox" checked={cfg.showCevap!==false} onChange={e=>uc("showCevap",e.target.checked)}/> Cevap Anahtarı</label>
+          </div>}
+          {tpl==="sinav"&&<div className="p-form"><input placeholder="Okul Adı" value={cfg.okul} onChange={e=>uc("okul",e.target.value)}/><input placeholder="Sınav Başlığı" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Süre (dk)" value={cfg.sure} onChange={e=>uc("sure",e.target.value)} className="sm"/></div>}
+          {(tpl==="konu"||tpl==="kitap")&&<div className="p-form"><input placeholder="Ünite" value={cfg.unite} onChange={e=>uc("unite",e.target.value)}/><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
+        </Sec>
+        <Sec n={3} title="Sayfa Düzeni" icon="⚙️">
+          <div className="p-row"><span className="p-lbl">Sütun</span><div className="p-btns">{[1,2,3].map(n=><button key={n} className={`p-sb${cols===n?" p-on":""}`} onClick={()=>setCols(n)}>{n}</button>)}</div></div>
+          <div className="p-row"><span className="p-lbl">Yazı Stili</span><FontPick v={font} set={setFont}/></div>
+          <div className="p-row"><span className="p-lbl">Yazı Boyutu</span><div className="p-sz"><button className="p-sb" onClick={()=>setQSize(s=>Math.max(8,s-0.5))}>−</button><span className="p-sv">{qSize}pt</span><button className="p-sb" onClick={()=>setQSize(s=>Math.min(16,s+0.5))}>+</button></div></div>
+          <div className="p-row"><span className="p-lbl">Sayfa başına</span><select className="p-sel" value={perPage} onChange={e=>setPerPage(+e.target.value)}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option><option value={12}>12</option><option value={15}>15</option><option value={20}>20</option><option value={999}>Tümü</option></select></div>
+          <div className="p-row"><span className="p-lbl">Numara</span><div className="p-btns p-wrap">{[["circle","●1"],["square","■1"],["plain","1)"],["dot","1."],["paren","(1)"],["dash","1-"],["none","—"]].map(([id,label])=><button key={id} className={`p-sb${(cfg.numStyle||"circle")===id?" p-on":""}`} onClick={()=>uc("numStyle",id)}>{label}</button>)}</div></div>
+          <div className="p-row"><span className="p-lbl">Sayfaya Yay</span><label className="p-chk" style={{margin:0}}><input type="checkbox" checked={!!cfg.stretch} onChange={e=>uc("stretch",e.target.checked)}/> Soruları sayfaya eşit dağıt</label></div>
+        </Sec>
+        <Sec n={4} title="Soru Ekle" icon="➕">
+          {err&&<div className="er" style={{margin:"0 0 8px"}}>⚠️ {err}</div>}
+          {busy&&<div className="ld"><div className="lds"/>İşleniyor...</div>}
+          {cleaning&&<div className="ld"><div className="lds"/>Temizleniyor...</div>}
+          <div className="stabs" style={{marginBottom:8}}>
+            <button className={`st${uploadSub==="draw"?" on":""}`} onClick={()=>setUploadSub("draw")}>✏️ Elle Çizim</button>
+            <button className={`st${uploadSub==="cam"?" on":""}`} onClick={()=>setUploadSub("cam")}>📷 Kamera</button>
+            <button className={`st${uploadSub==="file"?" on":""}`} onClick={()=>setUploadSub("file")}>📁 Dosyalar</button>
+            <button className={`st${uploadSub==="txt"?" on":""}`} onClick={()=>setUploadSub("txt")}>📝 Metin</button>
+          </div>
+          {uploadSub==="draw"&&<div>
+            <Canvas onDone={recognizeFromCanvas} busy={busy} onAddAsImage={addFromCanvas}/>
+          </div>}
+          {uploadSub==="cam"&&<div>
+            <div className="scan-btns">
+              <label className={`bup${busy?" wait":""}`}>{busy?"⏳ Çevriliyor...":"📷 Çek ve Yazıya Çevir"}<input type="file" accept="image/*" capture="environment" hidden disabled={busy} onChange={scan}/></label>
+              <label className={`bup bup3${cleaning?" wait":""}`}>{cleaning?"⏳ Ekleniyor...":"🖼️ Çek ve Resim Ekle"}<input type="file" accept="image/*" capture="environment" hidden disabled={cleaning} onChange={scanImg}/></label>
+            </div>
+          </div>}
+          {uploadSub==="file"&&<div>
+            <div className="scan-btns">
+              <label className={`bup${busy?" wait":""}`}>{busy?"⏳ Çevriliyor...":"📄 Seç ve Yazıya Çevir"}<input type="file" accept="image/*" multiple hidden disabled={busy} onChange={scan}/></label>
+              <label className={`bup bup3${cleaning?" wait":""}`}>{cleaning?"⏳ Ekleniyor...":"🖼️ Seç ve Resim Ekle"}<input type="file" accept="image/*" multiple hidden disabled={cleaning} onChange={scanImg}/></label>
+              <label className={`bup bup4${busy?" wait":""}`}>{busy?"⏳ Düzenleniyor...":"📖 Seç ve Ders Notu Yap"}<input type="file" accept="image/*" multiple hidden disabled={busy} onChange={scanBook}/></label>
+            </div>
+          </div>}
+          {uploadSub==="txt"&&<div>
+            <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
+              <textarea className="p-ta" value={txt} onChange={e=>setTxt(e.target.value)} rows={3} placeholder="Soruyu klavyeden yazın..."/>
+              <button className="p-tb" onClick={addTxt} disabled={!txt.trim()}>Ekle</button>
+            </div>
+          </div>}
+        </Sec>
+        {qs.length>0&&<div className="p-qs">
+          <div className="p-qh">📋 {qs.length} Soru <button className="p-qcl" onClick={()=>{saveHistory();setQs([]);setShow(false);}}>Tümünü Sil</button>{history.length>0&&<button className="p-qu" onClick={undo}>↩</button>}</div>
+          <div className="p-ql">{qs.map((q,i)=><QItem key={`q${i}`} index={i} html={q} onUpdate={(val)=>{const n=[...qs];n[i]=val;setQs(n);}} onDelete={()=>delQ(i)} onCopy={()=>copyQ(i)}
+            onReconvert={typeof q==="string"&&q.includes("<img")?()=>convertImgToText(i):()=>reconvert(i)} reconverting={converting===i}
+            onDragStart={setDragIdx} onDragOver={setOverIdx} onDrop={handleDrop} dragging={overIdx===i&&dragIdx!==i}/>)}</div>
+        </div>}
+      </div>
+      <div className="preview">
+        {qs.length===0?<div className="empty-msg"><div className="empty-icon">📄</div><div className="empty-title">Sayfa boş</div><div className="empty-desc">Sol panelden soru ekleyin</div></div>:
+        <div className="pw" ref={pvRef} onClick={e=>{const box=e.target.closest(".ebox,.bk-box,.bk-example,.bk-solve");if(box){const rect=box.getBoundingClientRect();const x=e.clientX-rect.left,y=e.clientY-rect.top;if(x>rect.width-60&&y<22)box.parentNode.removeChild(box);}}}>
+          <EditorToolbar pvRef={pvRef}/>
+          {Array.from({length:Math.ceil(qs.length/perPage)}).map((_,pi)=>{
+            const pageQs=qs.slice(pi*perPage,(pi+1)*perPage);
+            const tp=Math.ceil(qs.length/perPage);
+            return <div key={pi} className="pw-page">{pi>0&&<div className="pw-break"/>}<Page qs={pageQs} tpl={tpl} cols={cols} cfg={cfg} ff={ff} pageNum={pi+1} totalPages={tp} startNum={pi*perPage+1} qSize={qSize} spacings={spacings} imgSizes={imgSizes} imgOffsets={imgOffsets} onUpdateImgSize={(idx,val)=>{const ri=pi*perPage+idx;setImgSizes(s=>({...s,[ri]:val}));}} onUpdateImgOffset={(idx,val)=>{const ri=pi*perPage+idx;setImgOffsets(s=>({...s,[ri]:val}));}} onUpdateSpacing={(idx,val)=>{const ri=pi*perPage+idx;setSpacings(s=>({...s,[ri]:val}));}} onUpdateQ={(idx,html)=>{const ri=pi*perPage+idx;const n=[...qs];n[ri]=html;setQs(n);}}/></div>;
+          })}
+        </div>}
+      </div>
+    </main>
+  </div>);
+}
+
+
+/* ═══ MATH CSS — kesir çizgili, limit altında, integral sınırlı ═══ */
+function mathCSS(){return`
+.mf{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin:0 3px;line-height:1.1}
+.mfn{padding:2px 6px 3px;border-bottom:1.8px solid #222;text-align:center;font-size:.88em;min-width:12px}
+.mfd{padding:3px 6px 2px;text-align:center;font-size:.88em;min-width:12px}
+.mf .mf{margin:0 1px}.mf .mf .mfn,.mf .mf .mfd{font-size:.82em;padding:1px 3px}
+.mf .mf .mfn{border-bottom-width:1.2px}
+.ml{display:inline-flex;flex-direction:column;align-items:center;vertical-align:baseline;margin:0 2px 0 5px;line-height:1;position:relative;top:0.15em}
+.mlt{font-size:1em;font-style:normal;font-weight:400}
+.mlb{font-size:.62em;color:#333;line-height:1;margin-top:1px;white-space:nowrap}
+.mi{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin:0 3px;line-height:1}
+.miu{font-size:.58em;line-height:1;min-height:10px}
+.mis{font-size:1.6em;line-height:.82;font-family:'STIX Two Text','Times New Roman',serif}
+.mil{font-size:.58em;line-height:1;min-height:10px}
+.ms{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin:0 3px;line-height:1}
+.msu{font-size:.55em;line-height:1}
+.mss{font-size:1.5em;line-height:.78;font-family:'STIX Two Text','Times New Roman',serif}
+.msl{font-size:.55em;line-height:1}
+.mr{display:inline-flex;align-items:stretch;vertical-align:middle}
+.mrs{font-size:1.2em;line-height:1;font-family:'STIX Two Text','Times New Roman',serif}
+.mrc{border-top:1.5px solid #222;padding:2px 4px 0;display:inline-flex;align-items:center}
+sup{font-size:.7em;vertical-align:super;line-height:0}
+sub{font-size:.7em;vertical-align:sub;line-height:0}
+.mp{display:inline-flex;align-items:center;vertical-align:middle;margin:4px 2px}
+.mpb{font-family:'STIX Two Text','Times New Roman',serif;font-weight:200;color:#222;line-height:0.9;display:inline-flex;align-items:center;justify-content:center;margin-right:4px;flex-shrink:0}
+.mpc{display:inline-flex;flex-direction:column;gap:1px;padding:5px 0;justify-content:center}
+.mpl{display:block;line-height:1.85;white-space:nowrap;padding:2px 3px}
+.mmx{display:inline-flex;align-items:center;vertical-align:middle;margin:0 3px}
+.mmxb{font-family:'STIX Two Text','Times New Roman',serif;font-weight:200;color:#222;line-height:0.9;display:inline-flex;align-items:center;flex-shrink:0;padding:0 2px}
+.mmxg{display:inline-flex;flex-direction:column;gap:2px;padding:4px 0}
+.mmxr{display:flex;gap:12px;justify-content:center}
+.mmxc{text-align:center;min-width:14px;padding:2px 4px;line-height:1.5}
+`;}
+
+/* ═══ A4 CSS ═══ */
+function a4css(ff){return`
+.A4{width:210mm;min-height:297mm;padding:12mm 14mm;font-family:${ff};color:#1a1a1a;background:#fff;display:flex;flex-direction:column;line-height:1.75;position:relative}
+.QG{display:flex;gap:0;flex:1}
+.c1{flex-direction:column}.c1 .QC{border:none}
+.c2 .QC{flex:1;padding:0 14px}.c2 .QC:first-child{padding-left:0}.c2 .QC:last-child{padding-right:0}
+.c3 .QC{flex:1;padding:0 10px}.c3 .QC:first-child{padding-left:0}.c3 .QC:last-child{padding-right:0}
+.QDiv{display:flex;align-items:center;justify-content:center;position:relative;width:20px;flex-shrink:0}
+.QDl{width:1.5px;height:100%;background:#d0d0d0;display:block}
+.QDt{writing-mode:vertical-rl;text-orientation:mixed;font-size:7pt;color:#999;letter-spacing:2px;font-weight:600;white-space:nowrap;transform:rotate(180deg);text-align:center;padding:0 2px}
+.QI{margin-bottom:26px;display:flex;gap:10px;align-items:flex-start;page-break-inside:avoid}
+.A4-stretch .QC{display:flex;flex-direction:column;justify-content:space-between;min-height:100%}
+.A4-stretch .QI{margin-bottom:0!important}
+.A4-stretch.c1 .QG{flex-direction:column}
+.A4-stretch .QG{align-items:stretch}
+.QN{font-weight:800;font-size:1em;min-width:24px;flex-shrink:0;color:#1b2a4a;padding-top:1px}
+.QNcirc{background:#1b2a4a;color:#fff;min-width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.92em}
+.QNsq{background:#1b2a4a;color:#fff;min-width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:.92em}
+.Tders .QN{color:#2563eb}
+.Tduz .QN{color:#555}
+.QX{flex:1;min-width:0;overflow:visible}
+.QT{font-size:inherit;line-height:1.85;word-wrap:break-word}
+.QTE{outline:none;cursor:text;border-radius:3px;padding:2px 4px;margin:-2px -4px;transition:background .15s}
+.QTE:hover{background:rgba(37,99,235,.04)}
+.QTE:focus{background:rgba(37,99,235,.06);box-shadow:0 0 0 1.5px rgba(37,99,235,.2)}
+.QIM{width:100%;height:auto;display:block;background:#fff;border:none;outline:none;transition:transform .15s}
+.QIG{position:relative;overflow:visible}
+.QIS{display:flex;align-items:center;gap:3px;position:absolute;top:2px;right:2px;z-index:5;background:rgba(255,255,255,.9);border:1px solid #dde;border-radius:4px;padding:2px 4px;opacity:.15;transition:opacity .15s}
+.QIG:hover .QIS{opacity:1}
+.QISb{padding:2px 6px;border:1px solid #dde;background:#fff;border-radius:3px;font-size:10px;cursor:pointer;font-family:inherit;color:#888}.QISb:hover{border-color:#1b2a4a;color:#1b2a4a;background:#eef3ff}
+.QISt{font-size:8px;color:#888;min-width:30px;text-align:center}
+@media print{.QIS{display:none!important}}
+.QO{display:flex;gap:22px;margin-top:10px}.QOL{font-weight:700;font-size:10.5pt;color:#444}
+.QOA{min-height:8px;margin-top:6px;font-size:inherit;line-height:1.8;outline:none;padding:2px 4px;border-radius:3px;color:#333;cursor:text;transition:background .15s}
+.QOA:hover{background:rgba(37,99,235,.03)}
+.QOA:focus{background:rgba(37,99,235,.05);box-shadow:0 0 0 1px rgba(37,99,235,.15)}
+.QOA:empty::before{content:attr(data-ph);color:#ccc;font-size:9pt;font-style:italic}
+.QLS{margin-top:12px;display:flex;flex-direction:column;gap:20px}.QL{border-bottom:1px dotted #bbb}
+.QSP{display:flex;align-items:center;gap:3px;margin-top:4px;opacity:.3;transition:opacity .15s}
+.QI:hover .QSP{opacity:1}
+.QSPb{width:20px;height:18px;border:1px solid #dde;background:#fff;border-radius:3px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#888;font-weight:700;font-family:inherit}.QSPb:hover{border-color:#1b2a4a;color:#1b2a4a;background:#eef3ff}
+.QSPt{font-size:8px;color:#bbb;min-width:28px;text-align:center}
+@media print{.QSP{display:none!important}}
+.QOX{margin-top:8px;margin-left:34px}
+.qsvg{margin:8px 0;text-align:center}.qsvg svg{max-width:220px;height:auto}
+.qo-r{display:flex;gap:22px;font-weight:700;font-size:10.5pt;color:#333}
+.qo-c{display:flex;flex-direction:column;gap:6px;font-weight:700;font-size:10.5pt;color:#333}
+.qo-i{min-width:20px}
+.Tyaprak .Hbar{display:flex;border-radius:5px;overflow:hidden;margin-bottom:10px}
+.Hbl{background:#1b2a4a;color:#fff;flex:1;padding:12px 18px}.Hbk{font-size:16pt;font-weight:900}.Hba{font-size:9pt;opacity:.7;margin-top:2px}
+.Hbr{background:#f5a623;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 24px}
+.Hbt{font-size:7pt;font-weight:800;color:#1b2a4a;letter-spacing:2px}.Hbn{font-size:30pt;font-weight:900;color:#1b2a4a;line-height:1}
+.Hinf{font-size:8.5pt;color:#666;padding:6px 0;border-bottom:1.5px solid #ddd;margin-bottom:16px}
+.HbkE,.HbaE,.HinfE,.HduE,.HdbE,.HzhE{outline:none;cursor:text}.HbkE:focus,.HbaE:focus,.HinfE:focus,.HduE:focus,.HdbE:focus,.HzhE:focus{box-shadow:0 0 0 2px rgba(37,99,235,.2);border-radius:2px}
+.Tsinav .Hhd{text-align:center;border:2.5px solid #1a1a1a;padding:14px;margin-bottom:12px}.Hok{font-size:13pt;font-weight:900;text-transform:uppercase;letter-spacing:1.5px}.Hbs{font-size:11pt;font-weight:700;margin-top:4px}
+.HhdE{outline:none;cursor:text;transition:box-shadow .15s}.HhdE:focus{box-shadow:0 0 0 2px rgba(37,99,235,.2)}
+.Hsi{font-size:9pt;color:#555;padding:8px 0;border-bottom:1.5px solid #ccc;margin-bottom:18px}
+.HsiE{outline:none;cursor:text;transition:box-shadow .15s}.HsiE:focus{box-shadow:0 0 0 2px rgba(37,99,235,.2);border-radius:3px}
+.Tders .Hdh{margin-bottom:18px}.Hdu{font-size:8.5pt;text-transform:uppercase;letter-spacing:3px;color:#999;font-weight:700}.Hdb{font-size:18pt;font-weight:900;color:#1b2a4a;margin-top:3px}.Hdl{width:55px;height:4px;background:linear-gradient(90deg,#2563eb,#93c5fd);border-radius:3px;margin-top:8px}
+.Tduz .Hzh{text-align:center;font-size:16pt;font-weight:800;margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid #eee}
+
+/* ═══ Konu Anlatım Şablonu ═══ */
+.Tkonu{padding:14mm 16mm}
+.Bkh-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.Bkh-u{font-size:8.5pt;text-transform:uppercase;letter-spacing:3px;color:#888;font-weight:700}
+.Bkh-pn{font-size:9pt;color:#999;font-weight:600}
+.Bkh-title{font-size:22pt;font-weight:900;color:#1b2a4a;line-height:1.2;margin-bottom:8px;outline:none}
+.Bkh-line{height:4px;background:linear-gradient(90deg,#2563eb,#93c5fd,transparent);border-radius:3px;margin-bottom:20px}
+.Tkonu .QI{margin-bottom:14px}
+.Tkonu .QN{display:none}
+.Tkonu .QT{font-size:inherit;line-height:2}
+.Tkonu .QOA{display:none}
+
+/* ═══ Teorem Şablonu ═══ */
+.Tteorem{padding:14mm 16mm}
+.Bth{margin-bottom:18px;position:relative}
+.Bth-pn{position:absolute;top:0;right:0;font-size:9pt;color:#999;font-weight:600}
+.Bth-box{border:2.5px solid #1b2a4a;border-radius:8px;padding:16px 20px;background:linear-gradient(135deg,#f8faff,#eef3ff)}
+.Bth-label{font-size:7.5pt;text-transform:uppercase;letter-spacing:3px;color:#2563eb;font-weight:800;margin-bottom:4px}
+.Bth-title{font-size:15pt;font-weight:800;color:#1b2a4a;outline:none}
+.Tteorem .QI{margin-bottom:16px}
+.Tteorem .QN{display:none}
+.Tteorem .QT{font-size:inherit;line-height:2}
+.Tteorem .QOA::before{content:"";display:none}
+
+/* ═══ Çözümlü Örnek Şablonu ═══ */
+.Tornek{padding:14mm 16mm}
+.Boh{margin-bottom:16px;position:relative}
+.Boh-pn{position:absolute;top:0;right:0;font-size:9pt;color:#999;font-weight:600}
+.Boh-badge{display:inline-block;background:#1b2a4a;color:#f5a623;font-size:7.5pt;font-weight:800;letter-spacing:2px;text-transform:uppercase;padding:4px 12px;border-radius:4px;margin-bottom:6px}
+.Boh-title{font-size:14pt;font-weight:800;color:#1b2a4a;outline:none}
+.Tornek .QI{margin-bottom:10px;padding:10px 14px;border-left:3px solid #2563eb;background:#fafcff;border-radius:0 6px 6px 0}
+.Tornek .QN{color:#2563eb;font-weight:900;font-size:1.1em;min-width:auto;padding-right:8px}
+.Tornek .QNcirc,.Tornek .QNsq{background:#2563eb}
+.Tornek .QT{line-height:2}
+
+/* ═══ Özet Şablonu ═══ */
+.Tozet{padding:14mm 16mm}
+.Bzh-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.Bzh-u{font-size:8.5pt;text-transform:uppercase;letter-spacing:3px;color:#888;font-weight:700}
+.Bzh-pn{font-size:9pt;color:#999;font-weight:600}
+.Bzh-title{font-size:18pt;font-weight:900;color:#1b2a4a;margin-bottom:6px}
+.Bzh-line{height:3px;background:linear-gradient(90deg,#f5a623,#fcd34d,transparent);border-radius:3px;margin-bottom:18px}
+.Tozet .QI{margin-bottom:8px;padding:8px 12px;background:#fffdf5;border:1px solid #fde68a;border-radius:6px}
+.Tozet .QN{color:#d97706;font-weight:900}
+.Tozet .QNcirc{background:#d97706}
+.Tozet .QNsq{background:#d97706}
+.Tozet .QT{line-height:1.9}
+.Tozet .QOA{display:none}
+
+/* ═══ Düzenlenebilir Kutular ═══ */
+.ebox{padding:10px 14px;border-radius:6px;margin:8px 0;border-left:4px solid;line-height:1.8;position:relative}
+.ebox::after{content:"✕ Kutuyu Sil";position:absolute;top:2px;right:2px;font-size:9px;background:#ff4444;color:#fff;padding:2px 8px;border-radius:3px;cursor:pointer;opacity:0;transition:opacity .2s;pointer-events:none;font-family:'DM Sans',sans-serif;font-weight:600;z-index:10}
+.ebox:hover::after{opacity:0.8;pointer-events:auto}
+@media print{.ebox::after{display:none}}
+.ebox-blue{background:#eff6ff;border-color:#2563eb;color:#1e40af}
+.ebox-green{background:#f0fdf4;border-color:#16a34a;color:#166534}
+.ebox-orange{background:#fffbeb;border-color:#d97706;color:#92400e}
+.ebox-red{background:#fef2f2;border-color:#dc2626;color:#991b1b}
+.ebox-def{background:#eff6ff;border-color:#2563eb;border-left-width:4px}
+.ebox-thm{background:#f8faff;border:2px solid #1b2a4a;border-left:5px solid #1b2a4a;border-radius:6px}
+.ebox-warn{background:#fef3c7;border-color:#d97706;border-left-width:4px}
+.ebox-tip{background:#ecfdf5;border-color:#059669;border-left-width:4px}
+
+/* ═══ Kitap Sayfası Bileşenleri ═══ */
+.bk-title{font-size:17pt;font-weight:900;color:#1b2a4a;text-align:center;padding:8px 0 4px;margin-bottom:2px;letter-spacing:1px;border-bottom:3px solid #1b2a4a}
+.bk-sub{font-size:12.5pt;font-weight:800;color:#2563eb;padding:6px 0 3px;margin-top:6px;border-bottom:2px solid #dbeafe}
+
+.bk-box{padding:10px 14px;border-radius:8px;margin:8px 0;line-height:1.9;position:relative}
+.bk-box::after{content:"✕ Sil";position:absolute;top:2px;right:2px;font-size:9px;background:#ff4444;color:#fff;padding:2px 8px;border-radius:3px;cursor:pointer;opacity:0;transition:opacity .2s;pointer-events:none;font-family:'DM Sans',sans-serif;font-weight:600;z-index:10}
+.bk-box:hover::after{opacity:0.8;pointer-events:auto}
+@media print{.bk-box::after{display:none}}
+.bk-tag{display:inline-block;font-size:8pt;font-weight:800;letter-spacing:1.5px;padding:2px 10px;border-radius:4px;margin-bottom:6px;font-family:'DM Sans',sans-serif}
+.bk-def{background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #93c5fd;border-left:5px solid #2563eb}
+.bk-tag-def{background:#2563eb;color:#fff}
+.bk-thm{background:linear-gradient(135deg,#f8faff,#eef2ff);border:2px solid #1b2a4a;border-left:6px solid #1b2a4a}
+.bk-tag-thm{background:#1b2a4a;color:#f5a623}
+.bk-prop{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;border-left:5px solid #16a34a}
+.bk-tag-prop{background:#16a34a;color:#fff}
+.bk-warn{background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1.5px solid #fcd34d;border-left:5px solid #d97706}
+.bk-tag-warn{background:#d97706;color:#fff}
+.bk-tip{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border:1.5px solid #6ee7b7;border-left:5px solid #059669}
+.bk-tag-tip{background:#059669;color:#fff}
+
+.bk-formula{background:linear-gradient(135deg,#f8faff,#eef3ff);border:1.5px solid #bfdbfe;border-radius:6px;padding:8px 16px;margin:6px 0;text-align:center;font-size:1.1em;line-height:2}
+
+.bk-example{background:#fff;border:2px solid #2563eb;border-radius:8px;padding:0;margin:8px 0;overflow:hidden;position:relative}
+.bk-example::after{content:"✕ Sil";position:absolute;top:2px;right:2px;font-size:9px;background:#ff4444;color:#fff;padding:2px 8px;border-radius:3px;cursor:pointer;opacity:0;transition:opacity .2s;pointer-events:none;font-family:'DM Sans',sans-serif;font-weight:600;z-index:10}
+.bk-example:hover::after{opacity:0.8;pointer-events:auto}
+@media print{.bk-example::after{display:none}}
+.bk-ex-head{background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;font-size:9pt;font-weight:800;letter-spacing:1.5px;padding:5px 14px;font-family:'DM Sans',sans-serif}
+.bk-example>:not(.bk-ex-head){padding:8px 14px;line-height:1.9}
+
+.bk-solve{background:#fff;border:2px solid #16a34a;border-radius:8px;padding:0;margin:4px 0 8px;overflow:hidden;position:relative}
+.bk-solve::after{content:"✕ Sil";position:absolute;top:2px;right:2px;font-size:9px;background:#ff4444;color:#fff;padding:2px 8px;border-radius:3px;cursor:pointer;opacity:0;transition:opacity .2s;pointer-events:none;font-family:'DM Sans',sans-serif;font-weight:600;z-index:10}
+.bk-solve:hover::after{opacity:0.8;pointer-events:auto}
+@media print{.bk-solve::after{display:none}}
+.bk-sol-head{background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-size:9pt;font-weight:800;letter-spacing:1.5px;padding:5px 14px;font-family:'DM Sans',sans-serif}
+.bk-solve>:not(.bk-sol-head){padding:8px 14px;line-height:1.9}
+
+.bk-list{margin:4px 0}
+.bk-li{padding:3px 0 3px 4px;line-height:1.8}
+.bk-bullet{color:#2563eb;font-weight:700;margin-right:6px;font-size:0.8em}
+.CV{border-top:2.5px solid #1b2a4a;padding-top:8px;margin-top:auto}.CVT{font-size:7pt;font-weight:800;letter-spacing:2px;color:#1b2a4a;margin-bottom:5px}
+.CVG{display:flex;flex-wrap:wrap;gap:4px 12px}.CVR{display:flex;align-items:center;gap:2px}.CVN{font-size:7.5pt;min-width:16px;text-align:right;color:#1b2a4a;margin-right:2px}
+.CVC{width:15px;height:15px;border:1.2px solid #999;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:6pt;color:#666}
+.SF{font-size:9pt;color:#555;border-top:1.5px solid #ccc;padding-top:8px;margin-top:auto;display:flex;justify-content:space-between}
+.PF{font-size:8pt;color:#999;text-align:center;margin-top:auto;padding-top:8px;border-top:1px solid #eee}
+@media print{.A4{page-break-after:always;box-shadow:none;border-radius:0}.A4:last-child{page-break-after:auto}.QTE{background:none!important;box-shadow:none!important}.QOA{background:none!important;box-shadow:none!important}.QOA:empty::before{display:none}.pw-break{display:none}.hd,.panel,.acc,.bo,.hd-btn,.hd-acts,header.hd,.etb,.QSP,.QIS,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn{display:none!important}.mn2{grid-template-columns:1fr!important;display:block!important}.pw{margin:0!important;padding:0!important}@page{size:A4;margin:0}}
+`;}
+
+/* ═══ UI CSS ═══ */
+function uicss(){return`
+*{box-sizing:border-box;margin:0;padding:0}
+.ms{font-family:'DM Sans',system-ui,sans-serif;background:linear-gradient(135deg,#f5f6fa 0%,#e8eaf0 100%);min-height:100vh;color:#1a1a2e}
+.hd{background:linear-gradient(180deg,#fff 0%,#fafbfd 100%);border-bottom:1px solid #d8dce6;padding:10px 18px 0;box-shadow:0 1px 4px rgba(0,0,0,.03)}
+.hr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.hl{display:flex;align-items:center;gap:10px}
+.hi{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,#1b2a4a,#2a3f6e);display:flex;align-items:center;justify-content:center;color:#f5a623;font-size:17px;font-weight:900;box-shadow:0 2px 8px rgba(27,42,74,.25)}
+.hn{font-size:17px;color:#1b2a4a;letter-spacing:-.3px}
+.htn{display:flex;gap:3px}.htb{padding:9px 18px;border:none;background:none;font-family:inherit;font-size:12px;font-weight:500;color:#999;cursor:pointer;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:6px;transition:all .2s;position:relative}
+.htb:hover{color:#555;background:rgba(0,0,0,.02)}.htb.on{color:#1b2a4a;background:linear-gradient(135deg,#f5f6fa,#e8eaf0);font-weight:700}
+.htb.on::after{content:'';position:absolute;bottom:0;left:12px;right:12px;height:2.5px;background:#f5a623;border-radius:2px 2px 0 0}
+.htnm{width:20px;height:20px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;background:#e8eaef;color:#999;transition:all .2s}.htb.on .htnm{background:linear-gradient(135deg,#1b2a4a,#2a3f6e);color:#f5a623;box-shadow:0 1px 4px rgba(27,42,74,.2)}
+.hd-acts{display:flex;gap:6px}
+.hd-btn{padding:6px 14px;border:1.5px solid #d8dce6;background:#fff;border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;font-weight:600;color:#555;transition:all .15s}.hd-btn:hover{border-color:#1b2a4a;color:#1b2a4a;background:#f5f6fa}
+.mn2{display:flex;gap:0;min-height:calc(100vh - 60px)}
+.panel{width:360px;min-width:320px;background:#fff;border-right:1px solid #e0e2e8;overflow-y:auto;max-height:calc(100vh - 60px)}
+.preview{flex:1;overflow-y:auto;max-height:calc(100vh - 60px);padding:16px;background:linear-gradient(135deg,#f0f1f5,#e4e6ec)}
+@media(max-width:800px){.mn2{flex-direction:column}.panel{width:100%;min-width:auto;max-height:none;border-right:none;border-bottom:1px solid #e0e2e8}.preview{max-height:none}}
+.acc{border-bottom:1px solid #eef0f4}
+.acc-h{width:100%;display:flex;align-items:center;gap:10px;padding:12px 16px;border:none;background:#fff;font-family:inherit;font-size:13px;font-weight:700;color:#1b2a4a;cursor:pointer;transition:background .15s;text-align:left}.acc-h:hover{background:#f8f9fb}
+.acc-on{background:#f0f3ff!important;border-bottom:2px solid #2563eb}
+.acc-i{font-size:16px}.acc-t{flex:1}.acc-arr{font-size:11px;color:#999}
+.acc-body{padding:12px 16px;background:#fafbfd;border-top:1px solid #eef0f4}
+.p-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.p-card{display:flex;flex-direction:column;align-items:center;gap:4px;padding:14px 8px;border:2px solid #e8eaef;border-radius:10px;background:#fff;cursor:pointer;font-family:inherit;transition:all .15s}.p-card:hover{border-color:#93b4f5;background:#f8faff}
+.p-on{border-color:#2563eb!important;background:linear-gradient(135deg,#eff4ff,#dbeafe)!important;box-shadow:0 2px 8px rgba(37,99,235,.15)}
+.p-ic{font-size:28px}.p-nm{font-size:11px;font-weight:700;color:#444}
+.p-form{display:flex;flex-direction:column;gap:8px}
+.p-form input{padding:8px 12px;border:1.5px solid #d8dce6;border-radius:6px;font-family:inherit;font-size:12px;outline:none;transition:border .15s}.p-form input:focus{border-color:#2563eb}
+.p-form input.sm{max-width:80px}
+.p-chk{display:flex;align-items:center;gap:6px;font-size:11px;color:#666;cursor:pointer}
+.p-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.p-lbl{font-size:11px;font-weight:600;color:#888;min-width:70px}
+.p-btns{display:flex;gap:3px;flex-wrap:wrap}.p-wrap{flex-wrap:wrap}
+.p-sb{padding:5px 10px;border:1.5px solid #d8dce6;background:#fff;border-radius:5px;font-family:inherit;font-size:11px;cursor:pointer;font-weight:600;color:#666;transition:all .12s}.p-sb:hover{border-color:#2563eb;color:#2563eb}
+.p-sb.p-on{background:#1b2a4a;color:#fff;border-color:#1b2a4a}
+.p-sz{display:flex;align-items:center;gap:4px}
+.p-sv{font-size:11px;font-weight:700;color:#555;min-width:32px;text-align:center}
+.p-sel{padding:5px 8px;border:1.5px solid #d8dce6;border-radius:5px;font-family:inherit;font-size:11px}
+.p-add{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.p-abtn{display:flex;align-items:center;justify-content:center;gap:4px;padding:10px 8px;border:1.5px solid #d8dce6;border-radius:8px;background:#fff;font-family:inherit;font-size:12px;font-weight:600;color:#555;cursor:pointer;transition:all .15s;text-align:center}.p-abtn:hover{border-color:#2563eb;background:#f8faff;color:#2563eb}
+.p-a1{border-color:#2563eb;color:#2563eb;background:#eff4ff}.p-aon{background:#2563eb!important;color:#fff!important}
+.p-a2{border-color:#d97706;color:#92600a;background:#fffdf5}
+.p-aon{background:#1b2a4a!important;color:#fff!important;border-color:#1b2a4a!important}
+.p-upload{background:#f8f9fb;border:1px solid #eef0f4;border-radius:8px;padding:10px;margin-bottom:10px}
+.p-udesc{font-size:11px;color:#888;margin-bottom:8px}
+.p-urow{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.p-ulbl{font-size:12px;font-weight:700;color:#555;min-width:70px}
+.p-ubtn{padding:6px 12px;border:1.5px solid #2563eb;border-radius:6px;background:#eff4ff;font-family:inherit;font-size:11px;font-weight:600;color:#2563eb;cursor:pointer;transition:all .12s}.p-ubtn:hover{background:#dbeafe}
+.p-ubtn2{border-color:#7c3aed;color:#5b21b6;background:#f5f3ff}.p-ubtn2:hover{background:#ede9fe}
+.p-ubtn3{border-color:#16a34a;color:#166534;background:#f0fdf4}.p-ubtn3:hover{background:#dcfce7}
+.p-usrc{border-color:#555;color:#333;background:#f5f6fa;font-weight:700}.p-usrc:hover{background:#e8eaef}
+.p-umod{transition:all .15s}.p-umod-on{box-shadow:inset 0 0 0 2px #1b2a4a;font-weight:800}
+.p-a3{border-color:#7c3aed;color:#5b21b6;background:#f5f3ff}
+.p-a4{border-color:#16a34a;color:#166534;background:#f0fdf4}
+.p-draw{margin-bottom:10px}
+.p-txt{display:flex;gap:6px;align-items:flex-start}
+.p-ta{flex:1;padding:8px;border:1.5px solid #d8dce6;border-radius:6px;font-family:inherit;font-size:12px;resize:vertical;outline:none}.p-ta:focus{border-color:#2563eb}
+.p-tb{padding:8px 16px;background:#1b2a4a;color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}.p-tb:disabled{opacity:0.4}
+.p-qs{padding:12px 16px;border-top:1px solid #eef0f4}
+.p-qh{font-size:13px;font-weight:700;color:#1b2a4a;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.p-qcl{padding:3px 10px;border:1px solid #fca5a5;background:#fff;color:#dc2626;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit}.p-qcl:hover{background:#fef2f2}
+.p-qu{padding:3px 8px;border:1px solid #d8dce6;background:#fff;border-radius:4px;font-size:12px;cursor:pointer}.p-qu:hover{background:#f5f6fa}
+.fp{position:relative}.fp-b{display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid #d8dce6;background:#fff;border-radius:7px;cursor:pointer;font-family:inherit;font-size:10px;color:#888;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,.04)}.fp-b:hover{border-color:#1b2a4a;color:#1b2a4a}
+.fp-i{font-family:'STIX Two Text',serif;font-size:13px;font-weight:700;color:#1b2a4a}.fp-n{max-width:75px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fp-d{position:absolute;top:calc(100%+5px);right:0;width:210px;background:#fff;border:1px solid #d8dce6;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.12);z-index:100;max-height:280px;overflow-y:auto;padding:4px}
+.fp-o{display:flex;align-items:center;justify-content:space-between;width:100%;padding:7px 10px;border:none;background:none;cursor:pointer;border-radius:6px;font-family:inherit;text-align:left;transition:all .1s}.fp-o:hover{background:#f0f2f8}.fp-o.on{background:#eef3ff}
+.mn{max-width:900px;margin:0 auto;padding:16px}
+.clip-bar{background:linear-gradient(90deg,#fffbeb,#fef3c7);border-bottom:2px solid #f5a623;padding:10px 18px;font-size:11px;color:#92600a;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.clip-x{border:1px solid #e0c080;background:#fff;border-radius:5px;padding:3px 10px;font-size:10px;cursor:pointer;color:#92600a;font-family:inherit}.clip-x:hover{background:#fef3c7}
+.qins{width:100%;padding:6px;border:1.5px dashed #f5a623;background:#fffdf5;border-radius:6px;color:#b07d10;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit;margin:3px 0;transition:.15s}.qins:hover{background:#fef3c7;border-color:#d97706}
+.sc{display:flex;flex-direction:column;gap:10px;animation:fu .25s ease}@keyframes fu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.stabs{display:flex;gap:3px;background:#e8eaef;border-radius:8px;padding:3px;margin-bottom:6px}
+.st{flex:1;padding:8px;border:none;background:none;font-family:inherit;font-size:11px;font-weight:500;color:#999;cursor:pointer;border-radius:6px;text-align:center;transition:all .2s}.st:hover{color:#555}.st.on{background:#fff;color:#1b2a4a;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.cv-wrap{margin-bottom:6px}
+.cvb{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:6px 8px;background:linear-gradient(180deg,#fff,#f8f9fb);border:1px solid #d8dce6;border-radius:8px 8px 0 0;border-bottom:none}
+.cvb-g{display:flex;align-items:center;gap:2px}
+.cvb-grp{display:flex;flex-direction:column;align-items:center;gap:1px;padding:0 3px;border-right:1px solid #e8eaef}
+.cvb-grp:last-child{border-right:none}
+.cvb-gl{font-size:7px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.cvb-sz{gap:4px}.cvb-sl{font-size:9px;color:#999;min-width:16px;text-align:center}
+.cvb-rot{gap:4px}.cvb-rl{font-size:9px;color:#888;font-weight:600}
+.cvb-ts{gap:1px;background:#e8eaef;border-radius:5px;padding:2px}
+.ct-ts{min-width:26px;height:24px;font-size:14px;border:none;background:transparent;border-radius:3px}.ct-ts.on{background:#1b2a4a;color:#fff}
+.ct-sym{min-width:24px;height:24px;font-size:14px;font-family:'STIX Two Text',serif}
+.cbr-w{width:70px}
+.ct{min-width:30px;height:28px;border:1px solid #e0e2e8;background:#fff;font-family:inherit;font-size:13px;color:#555;border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 6px;transition:all .15s}
+.ct:hover{border-color:#1b2a4a;color:#1b2a4a;background:#f0f3f8}
+.ct.on{border-color:#1b2a4a;background:#1b2a4a;color:#fff}
+.ct:disabled{opacity:.3;cursor:default}
+.ct-dir{min-width:26px;height:24px;font-size:14px;padding:0 4px}
+.cvb-dir{gap:1px;background:#e8eaef;border-radius:4px;padding:1px}
+.ct-p{background:linear-gradient(135deg,#1b2a4a,#2a3f6e);color:#fff;border:none;font-size:10px;font-weight:600;padding:0 10px;min-width:auto}
+.ct-a{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;font-size:10px;font-weight:600;padding:0 10px;min-width:auto}
+.cclr{width:22px;height:22px;border-radius:50%;border:2px solid #e0e2e8;padding:0;min-width:22px}.cclr.on{border-color:#1b2a4a;box-shadow:0 0 0 2px rgba(27,42,74,.2);transform:scale(1.15)}
+.cbs{width:1px;height:20px;background:#e0e2e8;margin:0 2px}.cbr{width:50px;accent-color:#1b2a4a}
+.cb-chk{display:flex;align-items:center;gap:2px;font-size:9px;color:#888;cursor:pointer;white-space:nowrap}.cb-chk input{width:12px;height:12px;accent-color:#1b2a4a;cursor:pointer}
+.cv-area{position:relative;border:1px solid #d8dce6;border-radius:0 0 8px 8px;overflow:hidden}
+.cv-sel{position:absolute;border:2px dashed #2563eb;background:rgba(37,99,235,.05);pointer-events:none;z-index:3}
+.cvc{width:100%;height:300px;cursor:crosshair;background:#fff;touch-action:none;display:block}
+.cv-txt-wrap{position:absolute;z-index:5}
+.cv-txt{border:1.5px solid #2563eb;background:rgba(255,255,255,.95);border-radius:4px 4px 0 0;padding:4px 8px;font-family:'DM Sans',sans-serif;outline:none;min-width:60px;display:block;width:100%;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.cv-sym-row{display:flex;gap:1px;background:#fff;border:1.5px solid #2563eb;border-top:none;border-radius:0 0 4px 4px;padding:2px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.cv-sym{width:24px;height:22px;border:none;background:#f0f3f8;border-radius:3px;font-size:13px;font-family:'STIX Two Text',serif;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#333}.cv-sym:hover{background:#2563eb;color:#fff}
+.cv-lb{position:absolute;cursor:grab;font-family:'DM Sans',sans-serif;font-weight:700;user-select:none;transform:translate(-2px,-50%);z-index:4;padding:2px 4px;border-radius:3px;transition:background .1s}
+.cv-lb:hover{background:rgba(37,99,235,.1);outline:1.5px dashed rgba(37,99,235,.3)}
+.cv-lb-drag{cursor:grabbing;background:rgba(37,99,235,.12)}
+.cv-lb-x{position:absolute;top:-10px;right:-10px;width:20px;height:20px;border-radius:50%;border:1.5px solid #d44;background:#fff;color:#d44;font-size:13px;font-weight:700;cursor:pointer;display:none;align-items:center;justify-content:center;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.cv-lb:hover .cv-lb-x{display:flex}
+.cv-lb-x:hover{background:#d44;color:#fff}
+.bx2{background:#fff;border:1px solid #d8dce6;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.03)}
+.bt2{font-size:12px;color:#333;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-weight:600}
+.ht2{font-size:10px;color:#999;line-height:1.5;margin-bottom:8px}
+.ta{width:100%;padding:10px 12px;border:1.5px solid #d8dce6;border-radius:7px;font-family:inherit;font-size:16px;resize:vertical;background:#fafbfd}.ta:focus{outline:none;border-color:#1b2a4a;box-shadow:0 0 0 3px rgba(27,42,74,.08)}
+.bp{padding:6px 14px;background:linear-gradient(135deg,#1b2a4a,#2a3f6e);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:10.5px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(27,42,74,.2);transition:all .15s}.bp:hover{box-shadow:0 4px 12px rgba(27,42,74,.25)}.bp:disabled{opacity:.35}
+.shp-btns{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.shp-b{padding:6px 10px;border:1.5px solid #e0e2e8;background:#fff;border-radius:6px;font-family:inherit;font-size:10.5px;cursor:pointer;color:#555;transition:all .15s}.shp-b:hover{border-color:#2563eb;background:#eef3ff;color:#1b2a4a}
+.shp-div{text-align:center;margin:8px 0;position:relative}.shp-div::before,.shp-div::after{content:"";position:absolute;top:50%;width:38%;height:1px;background:#dde}.shp-div::before{left:0}.shp-div::after{right:0}
+.shp-dvt{font-size:9px;color:#999;background:#fff;padding:0 8px;position:relative}
+.cclr{width:20px;height:20px;border-radius:50%;border:2px solid #e0e2e8;padding:0;min-width:20px}.cclr.on{border-color:#1b2a4a;box-shadow:0 0 0 2px rgba(27,42,74,.2)}
+.cba2{background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 2px 6px rgba(37,99,235,.25)}
+.grp-row{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
+.grp-f{flex:1;min-width:120px}.grp-r{width:65px}
+.grp-l{display:block;font-size:9px;font-weight:600;color:#888;margin-bottom:2px}
+.grp-sm{width:100%!important;font-size:12px!important;padding:6px 8px!important}
+.grp-inp{flex:1;font-size:13px!important;padding:6px 8px!important}
+.grp-fn{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.grp-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.grp-fl{font-size:11px;font-weight:600;color:#555;min-width:35px}
+.grp-del{width:22px;height:22px;border:1px solid #f0c0c0;background:#fff;color:#d44;font-size:12px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center}.grp-del:hover{background:#fde0e0}
+.grp-add{border:1.5px dashed #c7d4e8;background:none;color:#2563eb;font-size:10px;font-weight:600;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:inherit;margin-bottom:6px}.grp-add:hover{background:#eef3ff}
+.grp-opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center}
+.grp-ex{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;align-items:center}
+.grp-el{font-size:9px;color:#999;margin-right:4px}
+.grp-eb{padding:4px 8px;border:1px solid #e0e2e8;background:#f8f9fb;border-radius:4px;font-family:inherit;font-size:10px;cursor:pointer;color:#555;transition:all .12s}.grp-eb:hover{border-color:#2563eb;background:#eef3ff;color:#2563eb}
+.grp-eb-on{border-color:#1b2a4a;background:#1b2a4a;color:#fff}
+.qsvg{margin:6px 0;display:flex;justify-content:center}.qsvg svg{max-width:100%;height:auto}
+.bo{padding:6px 14px;border:1.5px solid #1b2a4a;background:#fff;border-radius:6px;color:#1b2a4a;font-family:inherit;font-size:10.5px;font-weight:600;cursor:pointer;transition:all .15s}.bo:hover{background:#f0f3f8}
+.bo-pdf{border-color:#d44;color:#d44;background:#fff5f5}.bo-pdf:hover{background:#fde0e0;border-color:#c00}
+.bup{padding:8px 16px;border:1.5px solid #1b2a4a;background:#fff;border-radius:8px;color:#1b2a4a;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.04)}.bup:hover{background:#f0f3f8}.bup.wait{opacity:.5;cursor:wait}
+.bup3{border-color:#16a34a;color:#166534;background:linear-gradient(135deg,#f0fdf4,#dcfce7)}.bup3:hover{background:#bbf7d0}
+.bup4{border-color:#7c3aed;color:#5b21b6;background:linear-gradient(135deg,#f5f3ff,#ede9fe)}.bup4:hover{background:#ddd6fe}
+.bup-desc{display:block;font-size:9px;font-weight:400;opacity:0.7;margin-top:2px}
+.bup2{border-color:#f5a623;color:#92600a;background:linear-gradient(135deg,#fffdf5,#fef8e0)}.bup2:hover{background:#fef3c7}
+.scan-btns{display:flex;gap:6px;flex-wrap:wrap}
+.empty-msg{text-align:center;padding:40px 20px;color:#aaa}
+.empty-icon{font-size:48px;margin-bottom:8px;opacity:0.5}
+.empty-title{font-size:16px;font-weight:700;color:#999;margin-bottom:4px}
+.empty-desc{font-size:12px;color:#bbb;max-width:300px;margin:0 auto;line-height:1.6}
+.bxx{font-size:9px;color:#d44;background:none;border:none;cursor:pointer;font-family:inherit;font-weight:600}.bxx:hover{color:#a00}
+.upz{display:flex;flex-direction:column;align-items:center;gap:6px;padding:28px;border:2px dashed #d0d3da;border-radius:10px;cursor:pointer;background:#fafbfd;font-size:11px;color:#888;transition:all .2s}.upz:hover{border-color:#1b2a4a;color:#1b2a4a;background:#f5f7fb}
+.ups{width:24px;height:24px;border:2.5px solid #d5d6da;border-top-color:#1b2a4a;border-radius:50%;animation:sp .7s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+.ld{display:flex;align-items:center;gap:6px;margin-top:5px;padding:6px 10px;background:linear-gradient(90deg,#eef3ff,#f0f5ff);border:1px solid #c7d4e8;border-radius:6px;font-size:10px;color:#1b2a4a}
+.lds{width:12px;height:12px;border:2px solid #c7d4e8;border-top-color:#1b2a4a;border-radius:50%;animation:sp .7s linear infinite}
+.er{margin-top:5px;padding:6px 10px;background:linear-gradient(90deg,#fef0f0,#fff5f5);border:1px solid #f0c0c0;border-radius:6px;font-size:10px;color:#c44}
+.rl{margin-top:10px}.rlh{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px;color:#333;font-weight:600}
+.rsz{display:flex;align-items:center;gap:3px;margin-left:auto;margin-right:8px}
+.rsb{width:30px;height:26px;border:1px solid #d8dce6;background:#fff;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;color:#555;transition:all .15s}.rsb:hover{border-color:#1b2a4a;color:#1b2a4a;background:#eef3ff}
+.rst{font-size:9px;color:#999;min-width:32px;text-align:center}
+.rc{background:#fff;border:1px solid #e0e2e8;border-radius:8px;padding:12px;margin-bottom:6px;box-shadow:0 1px 4px rgba(0,0,0,.03)}
+.rcm{font-size:18px;line-height:1.7;margin-bottom:8px;color:#111;padding:10px 12px;background:linear-gradient(135deg,#f8f9fb,#f0f2f6);border-radius:6px;border:1px solid #e8eaef}
+.rcl{font-family:monospace;font-size:9px;color:#888;background:#f0f1f5;padding:4px 8px;border-radius:4px;margin-bottom:8px;word-break:break-all}
+.rca{display:flex;gap:5px;flex-wrap:wrap}
+.bcp{padding:7px 14px;border:1.5px solid #1b2a4a;background:#fff;border-radius:7px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;color:#1b2a4a;transition:all .15s}.bcp:hover{background:#eef3ff}.bcp.ok{background:#e8f5e9;border-color:#4caf50;color:#2e7d32}
+.bcp2{border-color:#999;color:#666}.bcp2:hover{border-color:#555;color:#333}
+.bcp3{border-color:#2563eb;color:#2563eb;background:linear-gradient(135deg,#f0f5ff,#e8eeff)}.bcp3:hover{background:#dbeafe}
+.bs{padding:3px 7px;border:1px solid #dde;background:#fff;border-radius:3px;font-size:9px;font-family:inherit;cursor:pointer;color:#666}.bs:hover{border-color:#1b2a4a;color:#1b2a4a}.bs.ok{background:#e8f5e9;border-color:#4caf50;color:#2e7d32}
+.ql{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;margin-bottom:6px;padding:2px}
+.qr{display:flex;align-items:center;gap:5px;padding:6px 8px;background:#fff;border-radius:7px;border:1px solid #e0e2e8;transition:all .15s}
+.qr:hover{border-color:#c0c4cc;box-shadow:0 2px 6px rgba(0,0,0,.04)}
+.qr-drag{border-color:#2563eb;background:#eef3ff;border-style:dashed}
+.qhandle{cursor:grab;color:#d0d3da;font-size:14px;flex-shrink:0;user-select:none;padding:0 2px;line-height:1}.qhandle:hover{color:#888}.qr:active .qhandle{cursor:grabbing}
+.qn{min-width:20px;font-size:10px;font-weight:700;color:#bbb;text-align:center;flex-shrink:0}
+.qce{flex:1;font-size:11px;color:#333;line-height:1.6;padding:6px 10px;border-radius:6px;border:1.5px solid #e8eaef;min-height:30px;outline:none;cursor:text;transition:all .2s;background:#fafbfd}
+.qce:focus{border-color:#1b2a4a;background:#fff;box-shadow:0 0 0 3px rgba(27,42,74,.06)}
+.qce:empty::before{content:"Soruyu buraya yazın...";color:#ccc}
+.qth{flex:1;max-height:48px;object-fit:contain;border-radius:4px;background:#fff}
+.qth-html{flex:1;font-size:10px;color:#333;overflow:hidden;max-height:40px;line-height:1.4}
+.qd{width:28px;height:28px;border:1px solid #f0c0c0;background:#fff;color:#d44;font-size:14px;cursor:pointer;flex-shrink:0;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;transition:all .15s}.qd:hover{background:#fde0e0;border-color:#d44}
+.qbtns{display:flex;gap:3px;flex-shrink:0}
+.qcp{width:28px;height:28px;border:1px solid #d8dce6;background:#fff;color:#888;font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all .15s}.qcp:hover{background:#eef3ff;border-color:#2563eb;color:#2563eb}
+.bundo{font-size:10px;color:#2563eb;background:linear-gradient(135deg,#eef3ff,#e8eeff);border:1px solid #c7d4e8;border-radius:5px;padding:3px 10px;cursor:pointer;font-family:inherit;font-weight:600;margin-left:6px}.bundo:hover{background:#dbeafe}
+.pa-sep{width:1px;height:18px;background:#d8dce6;margin:0 4px}
+.pa-pp{font-size:9.5px;color:#888;display:flex;align-items:center;gap:4px}.pa-pp select{padding:3px 6px;border:1px solid #d8dce6;border-radius:4px;font-size:9.5px;font-family:inherit}
+.pa-sz{display:flex;align-items:center;gap:3px}
+.pw-page{margin-bottom:20px}.pw-break{height:2px;background:repeating-linear-gradient(90deg,#bbb 0,#bbb 6px,transparent 6px,transparent 12px);margin:12px 0}
+.etb{display:flex;align-items:center;gap:3px;padding:6px 10px;background:linear-gradient(180deg,#fff,#fafbfd);border:1px solid #d8dce6;border-radius:8px;margin-bottom:10px;flex-wrap:wrap;position:sticky;top:0;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.etb-l{font-size:9px;color:#999;margin-right:5px}
+.etb-b{min-width:28px;height:26px;border:1px solid #e0e2e8;background:#fff;border-radius:5px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;color:#555;transition:all .12s;padding:0 5px}.etb-b:hover{border-color:#1b2a4a;color:#1b2a4a;background:#eef3ff}
+.etb-on{border-color:#1b2a4a;background:#eef3ff;font-weight:700}
+.etb-f{font-size:13px;min-width:30px}.etb-c{font-size:10px;min-width:26px}
+.etb-h{font-size:10px;min-width:24px;font-weight:700}
+.etb-bx{font-size:11px;min-width:26px}
+.etb-ins{font-size:9px;min-width:auto;padding:0 6px;white-space:nowrap}
+.etb-bk{background:#f0f3ff;border:1px solid #c7d4e8;border-radius:3px}
+.etb-ud{font-size:14px;min-width:28px;font-weight:700}
+.etb-sep{width:1px;height:20px;background:#e5e6ea;margin:0 3px}
+.qi{align-items:flex-start}
+.qcv{padding:5px 10px;border:1px solid #c7d4e8;background:linear-gradient(135deg,#eef3ff,#e8eeff);color:#2563eb;font-size:10px;font-weight:600;cursor:pointer;border-radius:6px;display:flex;align-items:center;white-space:nowrap;font-family:inherit;transition:all .15s}.qcv:hover{background:#dbeafe;border-color:#2563eb}.qcv:disabled{opacity:.5;cursor:wait}
+.lay{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.lr{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ll{font-size:9px;font-weight:600;color:#888;min-width:42px}
+.lg{display:flex;gap:3px}.lb{padding:5px 10px;border:1.5px solid #e0e2e8;background:#fff;border-radius:5px;cursor:pointer;font-family:inherit;font-size:10px;color:#666;transition:all .15s}.lb:hover{border-color:#bbc}.lb.on{border-color:#1b2a4a;background:linear-gradient(135deg,#eef3ff,#e8eeff);color:#1b2a4a;font-weight:700}
+.lsm{min-width:30px;text-align:center;padding:5px 8px}
+.lf{gap:4px}.lf input,.lf select{padding:4px 8px;border:1.5px solid #d8dce6;border-radius:5px;font-family:inherit;font-size:10px;flex:1;min-width:0}.lf input:focus{outline:none;border-color:#1b2a4a;box-shadow:0 0 0 3px rgba(27,42,74,.06)}.sm{max-width:60px;flex:none!important}
+.lchk{display:flex;align-items:center;gap:4px;font-size:9.5px;color:#666;white-space:nowrap;cursor:pointer;flex:none}.lchk input{width:15px;height:15px;accent-color:#1b2a4a;cursor:pointer;flex:none}
+.pa{display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap}
+.pw{margin-top:10px;overflow-x:auto;display:flex;flex-direction:column;align-items:center;padding-bottom:20px}
+.A4{box-shadow:0 4px 20px rgba(0,0,0,.08);border-radius:3px}
+@media(max-width:700px){.mn{padding:8px}.htn{overflow-x:auto}.htb{white-space:nowrap;font-size:11px;padding:7px 12px}.A4{width:100%;min-height:auto;padding:5mm;font-size:10pt}}
+`;}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
