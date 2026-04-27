@@ -17,18 +17,18 @@ const { useState, useRef, useEffect, useCallback } = React;
 
 
 const FONTS=[
-  {id:"stix",n:"STIX Two Text",f:"'STIX Two Text',serif"},
-  {id:"times",n:"Times New Roman",f:"'Times New Roman',serif"},
-  {id:"cambria",n:"Cambria",f:"Cambria,Georgia,serif"},
-  {id:"lora",n:"Lora",f:"'Lora',serif"},
-  {id:"merri",n:"Merriweather",f:"'Merriweather',serif"},
-  {id:"source",n:"Source Serif",f:"'Source Serif 4',serif"},
-  {id:"noto",n:"Noto Serif",f:"'Noto Serif',serif"},
-  {id:"garamond",n:"EB Garamond",f:"'EB Garamond',serif"},
-  {id:"crimson",n:"Crimson Pro",f:"'Crimson Pro',serif"},
-  {id:"libre",n:"Libre Baskerville",f:"'Libre Baskerville',serif"},
+  {id:"times",n:"Times New Roman + STIX",f:"'Times New Roman','STIX Two Text','Liberation Serif',serif"},
+  {id:"cambria",n:"Cambria",f:"Cambria,'Georgia','Liberation Serif',serif"},
+  {id:"cmu",n:"Computer Modern (LaTeX)",f:"'CMU Serif','Latin Modern Roman','Computer Modern','Cardo','STIX Two Text',serif"},
 ];
-const GF="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=STIX+Two+Text:wght@400;700&family=Lora:wght@400;700&family=Merriweather:wght@400;700&family=Source+Serif+4:wght@400;700&family=Noto+Serif:wght@400;700&family=EB+Garamond:wght@400;700&family=Crimson+Pro:wght@400;700&family=Libre+Baskerville:wght@400;700&display=swap";
+const GF="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=STIX+Two+Text:wght@400;700&family=Cardo:wght@400;700&display=swap";
+// Computer Modern (LaTeX font) — dreampulse/computer-modern-web-font CDN
+const CMU_FONT_FACE=`
+@font-face{font-family:'CMU Serif';font-weight:400;font-style:normal;font-display:swap;src:url('https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/fonts/Serif/cmunrm.otf') format('opentype')}
+@font-face{font-family:'CMU Serif';font-weight:700;font-style:normal;font-display:swap;src:url('https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/fonts/Serif/cmunbx.otf') format('opentype')}
+@font-face{font-family:'CMU Serif';font-weight:400;font-style:italic;font-display:swap;src:url('https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/fonts/Serif/cmunti.otf') format('opentype')}
+@font-face{font-family:'CMU Serif';font-weight:700;font-style:italic;font-display:swap;src:url('https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/fonts/Serif/cmunbi.otf') format('opentype')}
+`;
 
 
 let GEMINI_KEY="";
@@ -209,7 +209,8 @@ function Canvas({onDone,busy,onAddAsImage}){
   const[tool,setTool]=useState("pen");const[sz,setSz]=useState(2.5);const[clr,setClr]=useState("#111");const[dirty,setDirty]=useState(false);
   const[gridOpt,setGridOpt]=useState({grid:true,nums:true});
   const[undoStack,setUndoStack]=useState([]);
-  const[cvH,setCvH]=useState(300); // canvas yüksekliği
+  const[cvH,setCvH]=useState(450); // canvas yüksekliği
+  const[cvW,setCvW]=useState(null); // canvas genişliği (null=panel ile aynı, sayı=piksel)
   const[rightAngle,setRightAngle]=useState(0);
   const[arcShowDeg,setArcShowDeg]=useState(true);
   const[tickStyle,setTickStyle]=useState(0);
@@ -821,9 +822,26 @@ function Canvas({onDone,busy,onAddAsImage}){
         <span className="cvb-sl">{cvH}px</span>
         <button className="ct" onClick={()=>{
           const c=ref.current;const ctx=c.getContext("2d");const img=ctx.getImageData(0,0,c.width,c.height);
-          setCvH(h=>Math.min(700,h+50));
+          setCvH(h=>Math.min(1000,h+50));
           setTimeout(()=>{const c2=ref.current;const p=window.devicePixelRatio||2;c2.width=c2.offsetWidth*p;c2.height=c2.offsetHeight*p;const x=c2.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c2.offsetWidth,c2.offsetHeight);x.putImageData(img,0,0);},50);
-        }} title="Canvas büyüt">▼</button>
+        }} title="Canvas büyüt (yükseklik)">▼</button>
+        <div className="cbs"/>
+        <button className="ct" onClick={()=>{
+          const c=ref.current;const ctx=c.getContext("2d");const img=ctx.getImageData(0,0,c.width,c.height);
+          setCvW(w=>{const cur=w||c.offsetWidth;return Math.max(280,cur-60);});
+          setTimeout(()=>{const c2=ref.current;const p=window.devicePixelRatio||2;c2.width=c2.offsetWidth*p;c2.height=c2.offsetHeight*p;const x=c2.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c2.offsetWidth,c2.offsetHeight);x.putImageData(img,0,0);},50);
+        }} title="Canvas daralt (genişlik)">◀</button>
+        <span className="cvb-sl">{cvW?cvW+"px":"otomatik"}</span>
+        <button className="ct" onClick={()=>{
+          const c=ref.current;const ctx=c.getContext("2d");const img=ctx.getImageData(0,0,c.width,c.height);
+          setCvW(w=>{const cur=w||c.offsetWidth;return Math.min(2000,cur+60);});
+          setTimeout(()=>{const c2=ref.current;const p=window.devicePixelRatio||2;c2.width=c2.offsetWidth*p;c2.height=c2.offsetHeight*p;const x=c2.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c2.offsetWidth,c2.offsetHeight);x.putImageData(img,0,0);},50);
+        }} title="Canvas genişlet">▶</button>
+        {cvW&&<button className="ct" onClick={()=>{
+          const c=ref.current;const ctx=c.getContext("2d");const img=ctx.getImageData(0,0,c.width,c.height);
+          setCvW(null);
+          setTimeout(()=>{const c2=ref.current;const p=window.devicePixelRatio||2;c2.width=c2.offsetWidth*p;c2.height=c2.offsetHeight*p;const x=c2.getContext("2d");x.setTransform(p,0,0,p,0,0);x.fillStyle="#fff";x.fillRect(0,0,c2.offsetWidth,c2.offsetHeight);x.putImageData(img,0,0);},50);
+        }} title="Genişliği sıfırla (otomatik)" style={{fontSize:9}}>⟲</button>}
       </div>
       <div className="cbs"/>
       <div className="cvb-g">
@@ -832,7 +850,7 @@ function Canvas({onDone,busy,onAddAsImage}){
       </div>
     </div>
     <div className="cv-area" onMouseMove={onLabelMove} onMouseUp={onLabelUp} onMouseLeave={onLabelUp}>
-      <canvas ref={ref} className="cvc" style={{height:cvH}} onMouseDown={dn} onMouseMove={mv} onMouseUp={up} onMouseLeave={up} onTouchStart={dn} onTouchMove={mv} onTouchEnd={up}
+      <canvas ref={ref} className="cvc" style={{height:cvH,...(cvW?{width:cvW+"px",maxWidth:"none"}:{})}} onMouseDown={dn} onMouseMove={mv} onMouseUp={up} onMouseLeave={up} onTouchStart={dn} onTouchMove={mv} onTouchEnd={up}
         onDoubleClick={e=>{
           if(tool==="poly"&&polyPts.length>=3){
             e.preventDefault();const ctx=ref.current.getContext("2d");
@@ -1178,7 +1196,7 @@ SADECE SVG kodu döndür, başka hiçbir şey yazma. <svg> ile başla </svg> ile
         const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}
     }catch(e){}setConverting(null);
   };
-  const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
+  const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important;box-shadow:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}.QTE,.QTE:hover,.QTE:focus,.QOA,.QOA:hover,.QOA:focus{background:transparent!important;box-shadow:none!important;outline:none!important}.QOA:empty,.QOA:empty::before{display:none!important;content:none!important}.HbkE,.HbaE,.HinfE,.HduE,.HdbE,.HzhE,.HsiE,.HhdE{box-shadow:none!important;outline:none!important}body,html,.A4{background:#fff!important}${CMU_FONT_FACE}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
   const print=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu+" - "+cfg.alt));w.document.close();setTimeout(()=>w.print(),500);};
   const savePDF=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml((cfg.konu||"MathStudio")+"_"+(cfg.alt||"Test")));w.document.close();setTimeout(()=>w.print(),500);};
 
@@ -1588,7 +1606,22 @@ function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,
   const fs=qSize||11;
   const per=Math.ceil(qs.length/cols);
   const gs=[];for(let i=0;i<cols;i++)gs.push(qs.slice(i*per,(i+1)*per).map((q,qi)=>({q,n:sn+i*per+qi,idx:i*per+qi})));
-  return(<div className={`A4 T${tpl}${cfg.stretch?" A4-stretch":""}`} ref={r} style={{fontFamily:ff,fontSize:fs+'pt'}}>
+  return(<div className={`A4 T${tpl}${cfg.stretch?" A4-stretch":""}${cfg.watermark&&cfg.watermarkPrint===false?" wm-screen-only":""}`} ref={r} style={{fontFamily:ff,fontSize:fs+'pt'}}>
+    {cfg.watermark&&<div className="A4-wm" aria-hidden="true" style={{
+      position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
+      pointerEvents:"none",overflow:"hidden",zIndex:0,userSelect:"none"
+    }}>
+      <div style={{
+        fontSize:(cfg.watermarkSize||64)+"pt",
+        color:"#000",
+        opacity:(cfg.watermarkOpacity||10)/100,
+        transform:`rotate(${cfg.watermarkAngle!==undefined?cfg.watermarkAngle:-30}deg)`,
+        fontWeight:700,
+        letterSpacing:"4px",
+        whiteSpace:"nowrap",
+        fontFamily:"inherit"
+      }}>{cfg.watermark}</div>
+    </div>}
     {tpl==="yaprak"&&cfg.showHeader!==false&&<><div className="Hbar"><div className="Hbl"><div className="Hbk HbkE" contentEditable suppressContentEditableWarning>{cfg.konu||"MATEMATİK"}</div><div className="Hba HbaE" contentEditable suppressContentEditableWarning>{cfg.alt||"Konu Testi"}</div></div><div className="Hbr"><div className="Hbt">TEST</div><div className="Hbn">{cfg.no||"01"}</div></div></div>{cfg.showInfo!==false&&<div className="Hinf HinfE" contentEditable suppressContentEditableWarning>Ad Soyad: ...............................................................     D: .........  Y: .........  B: .........</div>}</>}
     {tpl==="sinav"&&cfg.showHeader!==false&&<><div className="Hhd HhdE" contentEditable suppressContentEditableWarning><div className="Hok">{cfg.okul||"………… OKULU"}</div><div className="Hbs">{cfg.baslik||"MATEMATİK YAZILI SINAVI"}</div></div><div className="Hsi HsiE" contentEditable suppressContentEditableWarning>Adı Soyadı: ..............................   Sınıf/No: ....../......   Süre: {cfg.sure||"40"} dk   Soru: {qs.length}</div></>}
     {tpl==="ders"&&<div className="Hdh"><div className="Hdu HduE" contentEditable suppressContentEditableWarning>{cfg.unite||"ÜNİTE 1"}</div><div className="Hdb HdbE" contentEditable suppressContentEditableWarning>{cfg.baslik||"ALIŞTIRMALAR"}</div><div className="Hdl"/></div>}
@@ -1676,6 +1709,13 @@ function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,
 }
 
 /* ═══ MAIN ═══ */
+function Sec({n,title,icon,children,openSec,setOpenSec}){
+  return(<div className="acc">
+    <button className={`acc-h${openSec===n?" acc-on":""}`} onClick={()=>setOpenSec(openSec===n?0:n)}><span className="acc-i">{icon}</span><span className="acc-t">{title}</span><span className="acc-arr">{openSec===n?"▾":"▸"}</span></button>
+    {openSec===n&&<div className="acc-body">{children}</div>}
+  </div>);
+}
+
 function App(){
   const[font,setFont]=useState("stix");
   const[tpl,setTpl]=useState("yaprak");const[cols,setCols]=useState(2);
@@ -1917,7 +1957,7 @@ function App(){
   const addFromCanvas=(dataUrl)=>{saveHistory();setQs(p=>[...p,'<img src="'+dataUrl+'" style="max-width:100%;height:auto"/>']);setShow(true);setDrawMode(false);};
   const recognizeFromCanvas=async(dataUrl)=>{setBusy(true);setErr("");try{const b=dataUrl.split(",")[1],m=dataUrl.match(/^data:(image\/\w+);/)?.[1]||"image/png";const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_FORMULA}]);const j=parseJ(raw);if(j.results?.length){saveHistory();setQs(p=>[...p,...j.results.map(r=>r.text)]);setShow(true);setDrawMode(false);}else setErr("Tanınamadı.");}catch(e){setErr(e.message==="Failed to fetch"?"Bağlantı kurulamadı.":e.message);}setBusy(false);};
 
-  const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
+  const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important;box-shadow:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}.QTE,.QTE:hover,.QTE:focus,.QOA,.QOA:hover,.QOA:focus{background:transparent!important;box-shadow:none!important;outline:none!important}.QOA:empty,.QOA:empty::before{display:none!important;content:none!important}.HbkE,.HbaE,.HinfE,.HduE,.HdbE,.HzhE,.HsiE,.HhdE{box-shadow:none!important;outline:none!important}body,html,.A4{background:#fff!important}${CMU_FONT_FACE}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
   const print=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu));w.document.close();setTimeout(()=>w.print(),500);};
   const savePDF=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu||"MathStudio"));w.document.close();setTimeout(()=>w.print(),500);};
 
@@ -1926,13 +1966,33 @@ function App(){
     if(!window.html2canvas){alert("Görsel kütüphanesi yüklenemedi. İnternet bağlantınızı kontrol edip sayfayı yenileyin.");return;}
     if(!pvRef.current){return;}
     setSharing(true);
+    // Capture sırasında tüm UI iz/placeholder'larını gizle
+    pvRef.current.classList.add("printing");
+    document.body.classList.add("printing");
+    // Aktif odaklı element varsa kaldır (focus glow capture'e girmesin)
+    if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+    await new Promise(r=>setTimeout(r,80)); // CSS uygulansın
     try{
       const pages=pvRef.current.querySelectorAll('.A4');
-      if(pages.length===0){alert("Paylaşılacak sayfa yok.");setSharing(false);return;}
+      if(pages.length===0){alert("Paylaşılacak sayfa yok.");setSharing(false);pvRef.current.classList.remove("printing");document.body.classList.remove("printing");return;}
       const files=[];
       for(let i=0;i<pages.length;i++){
-        // Sayfayı görsele dönüştür
-        const canvas=await window.html2canvas(pages[i],{scale:2,backgroundColor:"#fff",useCORS:true,logging:false});
+        // Sayfayı görsele dönüştür — onclone ile final temizlik
+        const canvas=await window.html2canvas(pages[i],{
+          scale:2,
+          backgroundColor:"#ffffff",
+          useCORS:true,
+          logging:false,
+          onclone:(doc)=>{
+            doc.body.classList.add("printing");
+            // Placeholder'ları zorla yok et
+            doc.querySelectorAll('[data-ph]').forEach(el=>{el.removeAttribute('data-ph');});
+            // Boş QOA'ları kaldır
+            doc.querySelectorAll('.QOA').forEach(el=>{if(!el.textContent.trim())el.remove();});
+            // Kontrol panellerini kaldır
+            doc.querySelectorAll('.QSP,.QIS,.etb,.q-imgbtn,.QXIC,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit').forEach(el=>el.remove());
+          }
+        });
         const blob=await new Promise(r=>canvas.toBlob(r,'image/png',0.95));
         const fname=(cfg.konu||"MathStudio").replace(/[^a-z0-9_-]/gi,'_')+`_sayfa${i+1}.png`;
         files.push(new File([blob],fname,{type:'image/png'}));
@@ -1960,18 +2020,17 @@ function App(){
     }catch(e){
       console.error(e);
       alert("Paylaşım hatası: "+e.message);
+    }finally{
+      // Sayfa görünümünü geri getir
+      if(pvRef.current)pvRef.current.classList.remove("printing");
+      document.body.classList.remove("printing");
     }
     setSharing(false);
   };
 
-  const Sec=({n,title,icon,children})=>(
-    <div className="acc">
-      <button className={`acc-h${openSec===n?" acc-on":""}`} onClick={()=>setOpenSec(openSec===n?0:n)}><span className="acc-i">{icon}</span><span className="acc-t">{title}</span><span className="acc-arr">{openSec===n?"▾":"▸"}</span></button>
-      {openSec===n&&<div className="acc-body">{children}</div>}
-    </div>
-  );
+  // Sec bileşeni modül seviyesine taşındı (input odak kaybını önlemek için)
 
-  return(<div className="ms"><link href={GF} rel="stylesheet"/><style>{uicss()}{a4css("inherit")}{mathCSS()}</style>
+  return(<div className="ms"><link href={GF} rel="stylesheet"/><style>{CMU_FONT_FACE}{uicss()}{a4css("inherit")}{mathCSS()}</style>
     <input ref={qImgFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={onQImgFile}/>
     <header className="hd"><div className="hr"><div className="hl"><div className="hi">∑</div><b className="hn">MathStudio</b>{saveStatus&&<span className="save-ind" style={{fontSize:11,color:saveStatus.startsWith("⚠")?"#c62828":saveStatus.startsWith("✓")?"#2e7d32":"#888",marginLeft:10,fontWeight:500}}>{saveStatus}</span>}</div>
       <div className="hd-acts">
@@ -1991,14 +2050,14 @@ function App(){
     </header>
     <main className="mn2">
       <div className="panel">
-        <Sec n={1} title="Döküman Şablonu" icon="📋">
+        <Sec openSec={openSec} setOpenSec={setOpenSec} n={1} title="Döküman Şablonu" icon="📋">
           <div className="p-grid">
             {[["yaprak","📝","Yaprak Test"],["sinav","📄","Sınav Kağıdı"],["konu","📖","Ders Notu"],["kitap","📚","Kitap Sayfası"]].map(([id,ic,nm])=>
               <button key={id} className={`p-card${tpl===id?" p-on":""}`} onClick={()=>setTpl(id)}><span className="p-ic">{ic}</span><span className="p-nm">{nm}</span></button>
             )}
           </div>
         </Sec>
-        <Sec n={2} title="Döküman Bilgileri" icon="📝">
+        <Sec openSec={openSec} setOpenSec={setOpenSec} n={2} title="Döküman Bilgileri" icon="📝">
           {tpl==="yaprak"&&<div className="p-form">
             <input placeholder="Konu (MATEMATİK)" value={cfg.konu} onChange={e=>uc("konu",e.target.value)}/>
             <input placeholder="Alt başlık (Konu Testi)" value={cfg.alt} onChange={e=>uc("alt",e.target.value)}/>
@@ -2012,15 +2071,39 @@ function App(){
           </div>}
           {(tpl==="konu"||tpl==="kitap")&&<div className="p-form"><input placeholder="Ünite" value={cfg.unite} onChange={e=>uc("unite",e.target.value)}/><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
         </Sec>
-        <Sec n={3} title="Sayfa Düzeni" icon="⚙️">
+        <Sec openSec={openSec} setOpenSec={setOpenSec} n={3} title="Sayfa Düzeni" icon="⚙️">
           <div className="p-row"><span className="p-lbl">Sütun</span><div className="p-btns">{[1,2,3].map(n=><button key={n} className={`p-sb${cols===n?" p-on":""}`} onClick={()=>setCols(n)}>{n}</button>)}</div></div>
           <div className="p-row"><span className="p-lbl">Yazı Stili</span><FontPick v={font} set={setFont}/></div>
           <div className="p-row"><span className="p-lbl">Yazı Boyutu</span><div className="p-sz"><button className="p-sb" onClick={()=>setQSize(s=>Math.max(8,s-0.5))}>−</button><span className="p-sv">{qSize}pt</span><button className="p-sb" onClick={()=>setQSize(s=>Math.min(16,s+0.5))}>+</button></div></div>
           <div className="p-row"><span className="p-lbl">Sayfa başına</span><select className="p-sel" value={perPage} onChange={e=>setPerPage(+e.target.value)}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option><option value={12}>12</option><option value={15}>15</option><option value={20}>20</option><option value={999}>Tümü</option></select></div>
           <div className="p-row"><span className="p-lbl">Numara</span><div className="p-btns p-wrap">{[["circle","●1"],["square","■1"],["plain","1)"],["dot","1."],["paren","(1)"],["dash","1-"],["none","—"]].map(([id,label])=><button key={id} className={`p-sb${(cfg.numStyle||"circle")===id?" p-on":""}`} onClick={()=>uc("numStyle",id)}>{label}</button>)}</div></div>
           <div className="p-row"><span className="p-lbl">Sayfaya Yay</span><label className="p-chk" style={{margin:0}}><input type="checkbox" checked={!!cfg.stretch} onChange={e=>uc("stretch",e.target.checked)}/> Soruları sayfaya eşit dağıt</label></div>
+          {cols>=2&&<div className="p-row"><span className="p-lbl">Dikey yazı</span><input className="p-sel" placeholder="Sütunlar arası kurum/okul adı" value={cfg.divText||""} onChange={e=>uc("divText",e.target.value)} style={{flex:1}}/></div>}
+          <div className="p-row" style={{flexDirection:"column",alignItems:"stretch",gap:6,padding:"8px",background:"#fff8e1",border:"1px solid #ffd54f",borderRadius:6}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><span className="p-lbl">💧 Filigran</span>
+              <input className="p-sel" placeholder="TASLAK / ÖRNEK / okul adı..." value={cfg.watermark||""} onChange={e=>uc("watermark",e.target.value)} style={{flex:1}}/>
+            </div>
+            {cfg.watermark&&<>
+              <div style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}>
+                <span style={{color:"#666",minWidth:60}}>Opaklık</span>
+                <input type="range" min="3" max="30" step="1" value={cfg.watermarkOpacity||10} onChange={e=>uc("watermarkOpacity",+e.target.value)} style={{flex:1}}/>
+                <span style={{minWidth:30,fontWeight:600}}>{cfg.watermarkOpacity||10}%</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}>
+                <span style={{color:"#666",minWidth:60}}>Boyut</span>
+                <input type="range" min="20" max="120" step="2" value={cfg.watermarkSize||64} onChange={e=>uc("watermarkSize",+e.target.value)} style={{flex:1}}/>
+                <span style={{minWidth:30,fontWeight:600}}>{cfg.watermarkSize||64}pt</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}>
+                <span style={{color:"#666",minWidth:60}}>Açı</span>
+                <input type="range" min="-90" max="90" step="5" value={cfg.watermarkAngle!==undefined?cfg.watermarkAngle:-30} onChange={e=>uc("watermarkAngle",+e.target.value)} style={{flex:1}}/>
+                <span style={{minWidth:30,fontWeight:600}}>{cfg.watermarkAngle!==undefined?cfg.watermarkAngle:-30}°</span>
+              </div>
+              <label className="p-chk" style={{margin:0,fontSize:11}}><input type="checkbox" checked={cfg.watermarkPrint!==false} onChange={e=>uc("watermarkPrint",e.target.checked)}/> Yazıcı çıktısında da göster</label>
+            </>}
+          </div>
         </Sec>
-        <Sec n={5} title={`Soru Bankası (${bank.length})`} icon="🗂️">
+        <Sec openSec={openSec} setOpenSec={setOpenSec} n={5} title={`Soru Bankası (${bank.length})`} icon="🗂️">
           <input ref={importBankRef} type="file" accept="application/json" style={{display:"none"}} onChange={onImportBankFile}/>
           <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
             <button className="p-sb" onClick={exportBank} disabled={!bank.length} title="Bankayı JSON olarak indir">📥 Yedekle</button>
@@ -2120,7 +2203,7 @@ function App(){
             </div>
           </div>
         </div>}
-        <Sec n={4} title="Soru Ekle" icon="➕">
+        <Sec openSec={openSec} setOpenSec={setOpenSec} n={4} title="Soru Ekle" icon="➕">
           {err&&<div className="er" style={{margin:"0 0 8px"}}>⚠️ {err}</div>}
           {busy&&<div className="ld"><div className="lds"/>İşleniyor...</div>}
           {cleaning&&<div className="ld"><div className="lds"/>Temizleniyor...</div>}
@@ -2221,6 +2304,11 @@ function a4css(ff){return`
 .QDl{width:1.5px;height:100%;background:#d0d0d0;display:block}
 .QDt{writing-mode:vertical-rl;text-orientation:mixed;font-size:7pt;color:#999;letter-spacing:2px;font-weight:600;white-space:nowrap;transform:rotate(180deg);text-align:center;padding:0 2px}
 .QI{margin-bottom:26px;display:flex;gap:10px;align-items:flex-start;page-break-inside:avoid}
+.A4-wm{z-index:0}
+.A4>*:not(.A4-wm){position:relative;z-index:1}
+.wm-screen-only .A4-wm{display:flex}
+@media print{.wm-screen-only .A4-wm{display:none!important}}
+.printing .wm-screen-only .A4-wm{display:none!important}
 .A4-stretch .QC{display:flex;flex-direction:column;justify-content:space-between;min-height:100%}
 .A4-stretch .QI{margin-bottom:0!important}
 .A4-stretch.c1 .QG{flex-direction:column}
@@ -2378,7 +2466,14 @@ function a4css(ff){return`
 .CVC{width:15px;height:15px;border:1.2px solid #999;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:6pt;color:#666}
 .SF{font-size:9pt;color:#555;border-top:1.5px solid #ccc;padding-top:8px;margin-top:auto;display:flex;justify-content:space-between}
 .PF{font-size:8pt;color:#999;text-align:center;margin-top:auto;padding-top:8px;border-top:1px solid #eee}
-@media print{.A4{page-break-after:always;box-shadow:none;border-radius:0}.A4:last-child{page-break-after:auto}.QTE{background:none!important;box-shadow:none!important}.QOA{background:none!important;box-shadow:none!important}.QOA:empty::before{display:none}.pw-break{display:none}.hd,.panel,.acc,.bo,.hd-btn,.hd-acts,header.hd,.etb,.QSP,.QIS,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}.mn2{grid-template-columns:1fr!important;display:block!important}.pw{margin:0!important;padding:0!important}@page{size:A4;margin:0}}
+@media print{.A4{page-break-after:always;box-shadow:none;border-radius:0;background:#fff!important}.A4:last-child{page-break-after:auto}.QTE,.QTE:hover,.QTE:focus,.QOA,.QOA:hover,.QOA:focus{background:transparent!important;box-shadow:none!important;outline:none!important}.QOA:empty,.QOA:empty::before{display:none!important;content:none!important}.HbkE,.HbaE,.HinfE,.HduE,.HdbE,.HzhE,.HsiE,.HhdE{box-shadow:none!important;outline:none!important;background:transparent!important}.pw-break{display:none}.hd,.panel,.acc,.bo,.hd-btn,.hd-acts,header.hd,.etb,.QSP,.QIS,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}.mn2{grid-template-columns:1fr!important;display:block!important}.pw{margin:0!important;padding:0!important;background:#fff!important}body,html{background:#fff!important}@page{size:A4;margin:0}}
+/* CAPTURING/PRINTING SINIFI — html2canvas ve yazdırma için sayfayı temizler */
+.printing .QTE,.printing .QTE:hover,.printing .QTE:focus,.printing .QOA,.printing .QOA:hover,.printing .QOA:focus{background:transparent!important;box-shadow:none!important;outline:none!important}
+.printing .QOA:empty,.printing .QOA:empty::before{display:none!important;content:none!important}
+.printing .HbkE,.printing .HbaE,.printing .HinfE,.printing .HduE,.printing .HdbE,.printing .HzhE,.printing .HsiE,.printing .HhdE{box-shadow:none!important;outline:none!important;background:transparent!important}
+.printing .QSP,.printing .QIS,.printing .etb,.printing .QOA-tools,.printing .q-tools,.printing .pw-tools,.printing .q-del,.printing .q-edit,.printing .q-imgbtn,.printing .QXIC{display:none!important}
+.printing .A4{box-shadow:none!important;border:none!important;background:#fff!important}
+.printing [contenteditable]{outline:none!important;background:transparent!important;box-shadow:none!important}
 `;}
 
 /* ═══ UI CSS ═══ */
@@ -2479,7 +2574,7 @@ function uicss(){return`
 .cclr{width:22px;height:22px;border-radius:50%;border:2px solid #e0e2e8;padding:0;min-width:22px}.cclr.on{border-color:#1b2a4a;box-shadow:0 0 0 2px rgba(27,42,74,.2);transform:scale(1.15)}
 .cbs{width:1px;height:20px;background:#e0e2e8;margin:0 2px}.cbr{width:50px;accent-color:#1b2a4a}
 .cb-chk{display:flex;align-items:center;gap:2px;font-size:9px;color:#888;cursor:pointer;white-space:nowrap}.cb-chk input{width:12px;height:12px;accent-color:#1b2a4a;cursor:pointer}
-.cv-area{position:relative;border:1px solid #d8dce6;border-radius:0 0 8px 8px;overflow:hidden}
+.cv-area{position:relative;border:1px solid #d8dce6;border-radius:0 0 8px 8px;overflow:auto}
 .cv-sel{position:absolute;border:2px dashed #2563eb;background:rgba(37,99,235,.05);pointer-events:none;z-index:3}
 .cvc{width:100%;height:300px;cursor:crosshair;background:#fff;touch-action:none;display:block}
 .cv-txt-wrap{position:absolute;z-index:5}
@@ -2537,60 +2632,11 @@ function uicss(){return`
 .ld{display:flex;align-items:center;gap:6px;margin-top:5px;padding:6px 10px;background:linear-gradient(90deg,#eef3ff,#f0f5ff);border:1px solid #c7d4e8;border-radius:6px;font-size:10px;color:#1b2a4a}
 .lds{width:12px;height:12px;border:2px solid #c7d4e8;border-top-color:#1b2a4a;border-radius:50%;animation:sp .7s linear infinite}
 .er{margin-top:5px;padding:6px 10px;background:linear-gradient(90deg,#fef0f0,#fff5f5);border:1px solid #f0c0c0;border-radius:6px;font-size:10px;color:#c44}
-.rl{margin-top:10px}.rlh{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px;color:#333;font-weight:600}
-.rsz{display:flex;align-items:center;gap:3px;margin-left:auto;margin-right:8px}
-.rsb{width:30px;height:26px;border:1px solid #d8dce6;background:#fff;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;color:#555;transition:all .15s}.rsb:hover{border-color:#1b2a4a;color:#1b2a4a;background:#eef3ff}
-.rst{font-size:9px;color:#999;min-width:32px;text-align:center}
-.rc{background:#fff;border:1px solid #e0e2e8;border-radius:8px;padding:12px;margin-bottom:6px;box-shadow:0 1px 4px rgba(0,0,0,.03)}
-.rcm{font-size:18px;line-height:1.7;margin-bottom:8px;color:#111;padding:10px 12px;background:linear-gradient(135deg,#f8f9fb,#f0f2f6);border-radius:6px;border:1px solid #e8eaef}
-.rcl{font-family:monospace;font-size:9px;color:#888;background:#f0f1f5;padding:4px 8px;border-radius:4px;margin-bottom:8px;word-break:break-all}
-.rca{display:flex;gap:5px;flex-wrap:wrap}
-.bcp{padding:7px 14px;border:1.5px solid #1b2a4a;background:#fff;border-radius:7px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;color:#1b2a4a;transition:all .15s}.bcp:hover{background:#eef3ff}.bcp.ok{background:#e8f5e9;border-color:#4caf50;color:#2e7d32}
-.bcp2{border-color:#999;color:#666}.bcp2:hover{border-color:#555;color:#333}
-.bcp3{border-color:#2563eb;color:#2563eb;background:linear-gradient(135deg,#f0f5ff,#e8eeff)}.bcp3:hover{background:#dbeafe}
-.bs{padding:3px 7px;border:1px solid #dde;background:#fff;border-radius:3px;font-size:9px;font-family:inherit;cursor:pointer;color:#666}.bs:hover{border-color:#1b2a4a;color:#1b2a4a}.bs.ok{background:#e8f5e9;border-color:#4caf50;color:#2e7d32}
-.ql{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto;margin-bottom:6px;padding:2px}
-.qr{display:flex;align-items:center;gap:5px;padding:6px 8px;background:#fff;border-radius:7px;border:1px solid #e0e2e8;transition:all .15s}
-.qr:hover{border-color:#c0c4cc;box-shadow:0 2px 6px rgba(0,0,0,.04)}
-.qr-drag{border-color:#2563eb;background:#eef3ff;border-style:dashed}
-.qhandle{cursor:grab;color:#d0d3da;font-size:14px;flex-shrink:0;user-select:none;padding:0 2px;line-height:1}.qhandle:hover{color:#888}.qr:active .qhandle{cursor:grabbing}
-.qn{min-width:20px;font-size:10px;font-weight:700;color:#bbb;text-align:center;flex-shrink:0}
-.qce{flex:1;font-size:11px;color:#333;line-height:1.6;padding:6px 10px;border-radius:6px;border:1.5px solid #e8eaef;min-height:30px;outline:none;cursor:text;transition:all .2s;background:#fafbfd}
-.qce:focus{border-color:#1b2a4a;background:#fff;box-shadow:0 0 0 3px rgba(27,42,74,.06)}
-.qce:empty::before{content:"Soruyu buraya yazın...";color:#ccc}
-.qth{flex:1;max-height:48px;object-fit:contain;border-radius:4px;background:#fff}
-.qth-html{flex:1;font-size:10px;color:#333;overflow:hidden;max-height:40px;line-height:1.4}
-.qd{width:28px;height:28px;border:1px solid #f0c0c0;background:#fff;color:#d44;font-size:14px;cursor:pointer;flex-shrink:0;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;transition:all .15s}.qd:hover{background:#fde0e0;border-color:#d44}
-.qbtns{display:flex;gap:3px;flex-shrink:0}
-.qcp{width:28px;height:28px;border:1px solid #d8dce6;background:#fff;color:#888;font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all .15s}.qcp:hover{background:#eef3ff;border-color:#2563eb;color:#2563eb}
-.bundo{font-size:10px;color:#2563eb;background:linear-gradient(135deg,#eef3ff,#e8eeff);border:1px solid #c7d4e8;border-radius:5px;padding:3px 10px;cursor:pointer;font-family:inherit;font-weight:600;margin-left:6px}.bundo:hover{background:#dbeafe}
-.pa-sep{width:1px;height:18px;background:#d8dce6;margin:0 4px}
-.pa-pp{font-size:9.5px;color:#888;display:flex;align-items:center;gap:4px}.pa-pp select{padding:3px 6px;border:1px solid #d8dce6;border-radius:4px;font-size:9.5px;font-family:inherit}
-.pa-sz{display:flex;align-items:center;gap:3px}
-.pw-page{margin-bottom:20px}.pw-break{height:2px;background:repeating-linear-gradient(90deg,#bbb 0,#bbb 6px,transparent 6px,transparent 12px);margin:12px 0}
-.etb{display:flex;align-items:center;gap:3px;padding:6px 10px;background:linear-gradient(180deg,#fff,#fafbfd);border:1px solid #d8dce6;border-radius:8px;margin-bottom:10px;flex-wrap:wrap;position:sticky;top:0;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.06)}
-.etb-l{font-size:9px;color:#999;margin-right:5px}
-.etb-b{min-width:28px;height:26px;border:1px solid #e0e2e8;background:#fff;border-radius:5px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;color:#555;transition:all .12s;padding:0 5px}.etb-b:hover{border-color:#1b2a4a;color:#1b2a4a;background:#eef3ff}
-.etb-on{border-color:#1b2a4a;background:#eef3ff;font-weight:700}
-.etb-f{font-size:13px;min-width:30px}.etb-c{font-size:10px;min-width:26px}
-.etb-h{font-size:10px;min-width:24px;font-weight:700}
-.etb-bx{font-size:11px;min-width:26px}
-.etb-ins{font-size:9px;min-width:auto;padding:0 6px;white-space:nowrap}
-.etb-bk{background:#f0f3ff;border:1px solid #c7d4e8;border-radius:3px}
-.etb-ud{font-size:14px;min-width:28px;font-weight:700}
-.etb-sep{width:1px;height:20px;background:#e5e6ea;margin:0 3px}
-.qi{align-items:flex-start}
-.qcv{padding:5px 10px;border:1px solid #c7d4e8;background:linear-gradient(135deg,#eef3ff,#e8eeff);color:#2563eb;font-size:10px;font-weight:600;cursor:pointer;border-radius:6px;display:flex;align-items:center;white-space:nowrap;font-family:inherit;transition:all .15s}.qcv:hover{background:#dbeafe;border-color:#2563eb}.qcv:disabled{opacity:.5;cursor:wait}
-.lay{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
-.lr{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ll{font-size:9px;font-weight:600;color:#888;min-width:42px}
-.lg{display:flex;gap:3px}.lb{padding:5px 10px;border:1.5px solid #e0e2e8;background:#fff;border-radius:5px;cursor:pointer;font-family:inherit;font-size:10px;color:#666;transition:all .15s}.lb:hover{border-color:#bbc}.lb.on{border-color:#1b2a4a;background:linear-gradient(135deg,#eef3ff,#e8eeff);color:#1b2a4a;font-weight:700}
-.lsm{min-width:30px;text-align:center;padding:5px 8px}
-.lf{gap:4px}.lf input,.lf select{padding:4px 8px;border:1.5px solid #d8dce6;border-radius:5px;font-family:inherit;font-size:10px;flex:1;min-width:0}.lf input:focus{outline:none;border-color:#1b2a4a;box-shadow:0 0 0 3px rgba(27,42,74,.06)}.sm{max-width:60px;flex:none!important}
-.lchk{display:flex;align-items:center;gap:4px;font-size:9.5px;color:#666;white-space:nowrap;cursor:pointer;flex:none}.lchk input{width:15px;height:15px;accent-color:#1b2a4a;cursor:pointer;flex:none}
-.pa{display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap}
-.pw{margin-top:10px;overflow-x:auto;display:flex;flex-direction:column;align-items:center;padding-bottom:20px}
-.A4{box-shadow:0 4px 20px rgba(0,0,0,.08);border-radius:3px}
-@media(max-width:700px){.mn{padding:8px}.htn{overflow-x:auto}.htb{white-space:nowrap;font-size:11px;padding:7px 12px}.A4{width:100%;min-height:auto;padding:5mm;font-size:10pt}}
+.rl{margin-top:10px}
+.rlh{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px;color:#333;font-weight:600}
+.rli{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#fff;border:1px solid #e0e0e0;border-radius:4px;margin-bottom:3px;font-size:10px}
+.rlb{padding:3px 8px;border:1px solid #d0d3da;background:#fff;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit}
+.save-ind{padding:2px 8px;border-radius:4px;background:rgba(0,0,0,.03)}
 `;}
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
