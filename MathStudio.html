@@ -8,6 +8,14 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  // PDF.js worker'ını yükle (klasik versiyon, daha güvenilir)
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    window.pdfjsLib = pdfjsLib;
+  }
+</script>
 </head>
 <body>
 <div id="root"></div>
@@ -47,7 +55,7 @@ async function callAI(content){
   let lastError=null;
   for(let attempt=0;attempt<maxRetries;attempt++){
     try{
-      const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,{
+      const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_KEY}`,{
         method:"POST",headers:{"Content-Type":"application/json"},body
       });
       if(r.ok){
@@ -123,11 +131,21 @@ KESİR: <span class="mf"><span class="mfn">pay</span><span class="mfd">payda</sp
 LİMİT: <span class="ml"><span class="mlt">lim</span><span class="mlb">x→a</span></span>
 İNTEGRAL: <span class="mi"><span class="miu">üst</span><span class="mis">∫</span><span class="mil">alt</span></span>
 TOPLAM: <span class="ms"><span class="msu">n</span><span class="mss">Σ</span><span class="msl">k=1</span></span>
-KAREKÖK: <span class="mr"><span class="mrs">√</span><span class="mrc">ifade</span></span>
+KAREKÖK (√): Şu HTML'i KULLAN — başka format YAZMA, "sqrt(x)" yazma, sadece "√" sembolü yazma:
+<span class="mr"><span class="mrs">√</span><span class="mrc">ifade</span></span>
+Örnek: √25 → <span class="mr"><span class="mrs">√</span><span class="mrc">25</span></span>
+Örnek: √(x²+1) → <span class="mr"><span class="mrs">√</span><span class="mrc">x²+1</span></span>
+Örnek: √x → <span class="mr"><span class="mrs">√</span><span class="mrc">x</span></span>
+KRİTİK: El çiziminde radikal sembolünün ÜSTÜNDE yatay çizgi varsa = KÖK, üstündeki ifade içeriğin parçası, mrc'ye yaz.
+ASLA √ sembolünü ✓ (tik) ile karıştırma.
 KÜP KÖK: <span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
+Örnek: ³√27 → <span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">27</span></span>
 n. KÖK: <span class="mr"><sup>n</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
+Örnek: ⁵√(x+1) → <span class="mr"><sup>5</sup><span class="mrs">√</span><span class="mrc">x+1</span></span>
 ÜSLÜ: x<sup>2</sup>  ALT: a<sub>1</sub>
-PARÇALI: <span class="mp"><span class="mpb">{</span><span class="mpc"><span class="mpl">ifade1 , koşul1</span><span class="mpl">ifade2 , koşul2</span></span></span>
+PARÇALI FONKSİYON: ÖNCE fonksiyon adını ve eşittir işaretini yaz (f(x) = ya da g(x) = veya h(x) = vb.), HEMEN SONRA parçalı yapı:
+f(x) = <span class="mp"><span class="mpb">{</span><span class="mpc"><span class="mpl">ifade1 , koşul1</span><span class="mpl">ifade2 , koşul2</span></span></span>
+ASLA tek başına parantez bırakma — fonksiyon adı (f(x), g(x) vb.) ve = işareti olmadan parçalı yapı yazma.
 MATRİS: <span class="mmx"><span class="mmxb">[</span><span class="mmxg"><span class="mmxr"><span class="mmxc">a</span><span class="mmxc">b</span></span><span class="mmxr"><span class="mmxc">c</span><span class="mmxc">d</span></span></span><span class="mmxb">]</span></span>
 
 ÖNEMLİ: Üs kısmı kesir ise kesir olarak yaz!
@@ -160,10 +178,13 @@ LİMİT (lim yazısının ALTINDA x→a):
 TOPLAM (Σ altında ve üstünde):
 <span class="ms"><span class="msu">n</span><span class="mss">Σ</span><span class="msl">k=1</span></span>
 
-KAREKÖK (√ işareti + üstten çizgi):
+KAREKÖK — KRİTİK: Bu HTML'i KULLAN, "sqrt()" yazma, sadece "√" yazma:
 <span class="mr"><span class="mrs">√</span><span class="mrc">ifade</span></span>
-Örnek: <span class="mr"><span class="mrs">√</span><span class="mrc">x²+1</span></span>
-
+Örnekler:
+- √x²+1 → <span class="mr"><span class="mrs">√</span><span class="mrc">x²+1</span></span>
+- √(2x-3) → <span class="mr"><span class="mrs">√</span><span class="mrc">2x-3</span></span>
+- √a → <span class="mr"><span class="mrs">√</span><span class="mrc">a</span></span>
+EL ÇİZİMİ: Radikal sembolü (√) + üzerinde yatay çizgi varsa = kök. ✓ (tik) ile karıştırma.
 KÜP KÖK (³√):
 <span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">ifade</span></span>
 Örnek: <span class="mr"><sup>3</sup><span class="mrs">√</span><span class="mrc">27</span></span>
@@ -173,7 +194,9 @@ n. DERECEDEN KÖK (ⁿ√):
 
 ÜSLÜ: x<sup>2</sup>, x<sup>n+1</sup>, e<sup>−x</sup>
 ALT SİMGE: a<sub>1</sub>, a<sub>n</sub>, x<sub>0</sub>
-PARÇALI: <span class="mp"><span class="mpb">{</span><span class="mpc"><span class="mpl">ifade , koşul</span></span></span>
+PARÇALI FONKSİYON — ÖNEMLİ: Önce "f(x) =" (veya g(x), h(x) vb.) yaz, HEMEN sonra parçalı yapı:
+f(x) = <span class="mp"><span class="mpb">{</span><span class="mpc"><span class="mpl">ifade1 , koşul1</span><span class="mpl">ifade2 , koşul2</span></span></span>
+ASLA fonksiyon adı olmadan tek başına parantez yazma.
 MATRİS: <span class="mmx"><span class="mmxb">[</span><span class="mmxg"><span class="mmxr"><span class="mmxc">a</span><span class="mmxc">b</span></span></span><span class="mmxb">]</span></span>
 
 DİĞER: π θ α β γ δ ε ∞ ± × ÷ ≤ ≥ ≠ ≈ → ⇒ ∈ ° ∠ ∥ ⊥ doğrudan Unicode kullan.
@@ -223,6 +246,20 @@ SAYFA DÜZENLEME KURALLARI:
 JSON: {"questions":["bölüm1 html","bölüm2 html",...]}
 Backtick veya markdown KULLANMA. Sadece JSON.`;
 
+// === DERSE GÖRE EK AI TALİMATI (sadece matematik+geometri ağırlıklı) ===
+const DERS_LIST=["Matematik","Geometri","Genel"];
+const DERS_HINTS={
+  "Matematik":``,
+  "Geometri":`
+DERS: GEOMETRİ — Ek formatlar:
+- Açıları belirt: ∠ABC, ∠A=60°
+- Üçgen, dörtgen, çember sembollerini Unicode olarak yaz: △ABC, ▱, ⊙O
+- Paralel: AB ∥ CD, dik: AB ⊥ CD, eş: ≅, benzer: ∼
+- Uzunluklar: |AB|, |OA|=r
+- Şekil/grafik varsa [Şekil: ...] yaz, çünkü AI çizim üretmiyor`,
+  "Genel":``
+};
+
 /* ═══ COMPONENTS ═══ */
 function FontPick({v,set}){
   const[o,setO]=useState(false);const r=useRef();const s=FONTS.find(f=>f.id===v)||FONTS[0];
@@ -237,6 +274,138 @@ function Canvas({onDone,busy,onAddAsImage}){
   const ref=useRef();const drawing=useRef(false);const startPt=useRef(null);const pathPts=useRef([]);const snapshot=useRef(null);const lastPt=useRef(null);
   const[tool,setTool]=useState("pen");const[sz,setSz]=useState(2.5);const[clr,setClr]=useState("#111");const[dirty,setDirty]=useState(false);
   const[aiCleaning,setAiCleaning]=useState(false);
+  // === YENİ: Hazır şekil + Snap-to-grid + Local şekil tanıma ===
+  const[shapeType,setShapeType]=useState("rect"); // tool="shape" ise hangi şekil
+  const[snapGrid,setSnapGrid]=useState(false); // ızgaraya yapışma
+  const[autoSnap,setAutoSnap]=useState(false); // pen sonrası şekil tanıma
+  const SHAPE_LIST=[
+    {id:"rect",label:"Dikdörtgen",icon:"▭"},
+    {id:"square",label:"Kare",icon:"⬜"},
+    {id:"circle",label:"Daire",icon:"○"},
+    {id:"ellipse",label:"Elips",icon:"⬭"},
+    {id:"triangle",label:"Üçgen",icon:"△"},
+    {id:"rtriangle",label:"Dik Üçgen",icon:"◣"},
+    {id:"parallelogram",label:"Paralelkenar",icon:"▱"},
+    {id:"trapezoid",label:"Yamuk",icon:"⏢"},
+    {id:"diamond",label:"Eşkenar Dörtgen",icon:"◇"},
+    {id:"pentagon",label:"Beşgen",icon:"⬠"},
+    {id:"hexagon",label:"Altıgen",icon:"⬡"},
+    {id:"axes",label:"Koord. Düzlemi",icon:"➕"}
+  ];
+  // Izgaraya yapıştır (snapGrid açıksa)
+  const snapPt=(x,y)=>{
+    if(!snapGrid)return[x,y];
+    const g=20; // grid 20px
+    return[Math.round(x/g)*g,Math.round(y/g)*g];
+  };
+  // Hazır şekli çiz (start ve end koordinatları arasında)
+  const drawShape=(x1,y1,x2,y2)=>{
+    const ctx=ref.current.getContext("2d");
+    ctx.strokeStyle=clr;ctx.lineWidth=sz;ctx.fillStyle="transparent";
+    const minX=Math.min(x1,x2),maxX=Math.max(x1,x2);
+    const minY=Math.min(y1,y2),maxY=Math.max(y1,y2);
+    const w=maxX-minX,h=maxY-minY;
+    if(w<3||h<3)return;
+    ctx.beginPath();
+    if(shapeType==="rect"){
+      ctx.rect(minX,minY,w,h);
+    }else if(shapeType==="square"){
+      const s=Math.min(w,h);ctx.rect(minX,minY,s,s);
+    }else if(shapeType==="circle"){
+      const r=Math.min(w,h)/2;ctx.arc(minX+r,minY+r,r,0,Math.PI*2);
+    }else if(shapeType==="ellipse"){
+      ctx.ellipse(minX+w/2,minY+h/2,w/2,h/2,0,0,Math.PI*2);
+    }else if(shapeType==="triangle"){
+      ctx.moveTo(minX+w/2,minY);ctx.lineTo(minX,maxY);ctx.lineTo(maxX,maxY);ctx.closePath();
+    }else if(shapeType==="rtriangle"){
+      ctx.moveTo(minX,minY);ctx.lineTo(minX,maxY);ctx.lineTo(maxX,maxY);ctx.closePath();
+    }else if(shapeType==="parallelogram"){
+      const off=w*0.2;ctx.moveTo(minX+off,minY);ctx.lineTo(maxX,minY);ctx.lineTo(maxX-off,maxY);ctx.lineTo(minX,maxY);ctx.closePath();
+    }else if(shapeType==="trapezoid"){
+      const off=w*0.18;ctx.moveTo(minX+off,minY);ctx.lineTo(maxX-off,minY);ctx.lineTo(maxX,maxY);ctx.lineTo(minX,maxY);ctx.closePath();
+    }else if(shapeType==="diamond"){
+      ctx.moveTo(minX+w/2,minY);ctx.lineTo(maxX,minY+h/2);ctx.lineTo(minX+w/2,maxY);ctx.lineTo(minX,minY+h/2);ctx.closePath();
+    }else if(shapeType==="pentagon"){
+      const cx=minX+w/2,cy=minY+h/2,rx=w/2,ry=h/2;
+      for(let i=0;i<5;i++){const a=-Math.PI/2+i*2*Math.PI/5;const px=cx+rx*Math.cos(a),py=cy+ry*Math.sin(a);if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}
+      ctx.closePath();
+    }else if(shapeType==="hexagon"){
+      const cx=minX+w/2,cy=minY+h/2,rx=w/2,ry=h/2;
+      for(let i=0;i<6;i++){const a=i*Math.PI/3;const px=cx+rx*Math.cos(a),py=cy+ry*Math.sin(a);if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}
+      ctx.closePath();
+    }else if(shapeType==="axes"){
+      // Koordinat düzlemi: x ve y eksenleri ortadan, oklarla
+      const cx=minX+w/2,cy=minY+h/2;
+      ctx.moveTo(minX,cy);ctx.lineTo(maxX,cy);
+      ctx.moveTo(maxX-8,cy-4);ctx.lineTo(maxX,cy);ctx.lineTo(maxX-8,cy+4);
+      ctx.moveTo(cx,maxY);ctx.lineTo(cx,minY);
+      ctx.moveTo(cx-4,minY+8);ctx.lineTo(cx,minY);ctx.lineTo(cx+4,minY+8);
+    }
+    ctx.stroke();
+    // Eksen etiketleri
+    if(shapeType==="axes"){
+      ctx.fillStyle=clr;ctx.font="italic 14px 'STIX Two Text',serif";
+      ctx.fillText("x",maxX-12,minY+h/2-4);ctx.fillText("y",minX+w/2+5,minY+10);ctx.fillText("O",minX+w/2-9,minY+h/2+12);
+    }
+  };
+  // Local şekil tanıma — pathPts'e bakıp şekli tahmin eder
+  const recognizeStroke=(pts)=>{
+    if(pts.length<6)return null;
+    const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
+    const minX=Math.min(...xs),maxX=Math.max(...xs);
+    const minY=Math.min(...ys),maxY=Math.max(...ys);
+    const w=maxX-minX,h=maxY-minY;
+    if(w<20&&h<20)return null;
+    const first=pts[0],last=pts[pts.length-1];
+    const closed=Math.hypot(first[0]-last[0],first[1]-last[1])<Math.max(w,h)*0.25;
+    // Yol uzunluğu / çevreden oran ile şekil tahmini
+    let plen=0;for(let i=1;i<pts.length;i++)plen+=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+    if(!closed){
+      // Düz çizgi mi?
+      const dist=Math.hypot(last[0]-first[0],last[1]-first[1]);
+      if(dist>0&&plen/dist<1.15)return{type:"line",x1:first[0],y1:first[1],x2:last[0],y2:last[1]};
+      return null;
+    }
+    // Kapalı: daire mi, dörtgen mi, üçgen mi?
+    const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+    const rAvg=pts.reduce((s,p)=>s+Math.hypot(p[0]-cx,p[1]-cy),0)/pts.length;
+    const rDev=pts.reduce((s,p)=>s+Math.abs(Math.hypot(p[0]-cx,p[1]-cy)-rAvg),0)/pts.length;
+    if(rDev/rAvg<0.18&&Math.abs(w-h)/Math.max(w,h)<0.25){
+      // Daire (yarıçap sapması düşük + kare bbox)
+      return{type:"circle",cx,cy,r:rAvg};
+    }
+    if(rDev/rAvg<0.25){
+      // Elips
+      return{type:"ellipse",cx,cy,rx:w/2,ry:h/2};
+    }
+    // Köşe sayısını hesapla: yön değişim noktaları
+    const corners=[];
+    const step=Math.max(3,Math.floor(pts.length/40));
+    for(let i=step;i<pts.length-step;i+=step){
+      const dx1=pts[i][0]-pts[i-step][0],dy1=pts[i][1]-pts[i-step][1];
+      const dx2=pts[i+step][0]-pts[i][0],dy2=pts[i+step][1]-pts[i][1];
+      const a1=Math.atan2(dy1,dx1),a2=Math.atan2(dy2,dx2);
+      let da=Math.abs(a2-a1);if(da>Math.PI)da=2*Math.PI-da;
+      if(da>Math.PI/4)corners.push(pts[i]);
+    }
+    // Yakın köşeleri birleştir
+    const cs=[];corners.forEach(c=>{if(!cs.some(x=>Math.hypot(x[0]-c[0],x[1]-c[1])<25))cs.push(c);});
+    if(cs.length===3)return{type:"triangle",pts:cs};
+    if(cs.length===4)return{type:"rect",minX,minY,maxX,maxY};
+    return null;
+  };
+  // Tanınan şekli temiz çiz
+  const drawRecognized=(s)=>{
+    const ctx=ref.current.getContext("2d");
+    ctx.strokeStyle=clr;ctx.lineWidth=sz;ctx.fillStyle="transparent";
+    ctx.beginPath();
+    if(s.type==="line"){ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);}
+    else if(s.type==="circle"){ctx.arc(s.cx,s.cy,s.r,0,Math.PI*2);}
+    else if(s.type==="ellipse"){ctx.ellipse(s.cx,s.cy,s.rx,s.ry,0,0,Math.PI*2);}
+    else if(s.type==="triangle"){const p=s.pts;ctx.moveTo(p[0][0],p[0][1]);ctx.lineTo(p[1][0],p[1][1]);ctx.lineTo(p[2][0],p[2][1]);ctx.closePath();}
+    else if(s.type==="rect"){ctx.rect(s.minX,s.minY,s.maxX-s.minX,s.maxY-s.minY);}
+    ctx.stroke();
+  };
   // AI ile el çizimini temiz SVG olarak yeniden çiz
   const cleanWithAI=async()=>{
     if(!dirty)return;
@@ -765,10 +934,32 @@ Backtick veya markdown KULLANMA.`;
     }else if(tool==="circle"){
       restoreSnap();const r=Math.sqrt((a-startPt.current[0])**2+(b-startPt.current[1])**2);
       x.beginPath();x.arc(startPt.current[0],startPt.current[1],r,0,Math.PI*2);x.strokeStyle=clr;x.lineWidth=sz;x.stroke();
-    }else if(tool==="rect"){
-      restoreSnap();const rx=Math.min(startPt.current[0],a),ry=Math.min(startPt.current[1],b);
-      const rw=Math.abs(a-startPt.current[0]),rh=Math.abs(b-startPt.current[1]);
-      x.beginPath();x.rect(rx,ry,rw,rh);x.strokeStyle=clr;x.lineWidth=sz;x.stroke();
+    }else if(tool==="rect"||tool==="ellipse"||tool==="square"||tool==="rtri"||tool==="par"||tool==="trap"||tool==="dia"||tool==="pent"||tool==="hex"||tool==="axes"){
+      restoreSnap();
+      const sp=startPt.current;
+      const[ea,eb]=snapPt(a,b); // snap-to-grid uygula
+      // shapeType'ı geçici olarak tool'a göre ayarla
+      const prev=shapeType;
+      // Tool ID'lerini drawShape uygun ID'ye eşle
+      const map={rect:"rect",ellipse:"ellipse",square:"square",rtri:"rtriangle",par:"parallelogram",trap:"trapezoid",dia:"diamond",pent:"pentagon",hex:"hexagon",axes:"axes"};
+      // Inline drawShape (state değiştirmeden)
+      const minX=Math.min(sp[0],ea),maxX=Math.max(sp[0],ea);
+      const minY=Math.min(sp[1],eb),maxY=Math.max(sp[1],eb);
+      const w=maxX-minX,h=maxY-minY;
+      x.strokeStyle=clr;x.lineWidth=sz;x.beginPath();
+      const t=map[tool];
+      if(t==="rect")x.rect(minX,minY,w,h);
+      else if(t==="square"){const s=Math.min(w,h);x.rect(minX,minY,s,s);}
+      else if(t==="ellipse")x.ellipse(minX+w/2,minY+h/2,w/2,h/2,0,0,Math.PI*2);
+      else if(t==="rtriangle"){x.moveTo(minX,minY);x.lineTo(minX,maxY);x.lineTo(maxX,maxY);x.closePath();}
+      else if(t==="parallelogram"){const off=w*0.2;x.moveTo(minX+off,minY);x.lineTo(maxX,minY);x.lineTo(maxX-off,maxY);x.lineTo(minX,maxY);x.closePath();}
+      else if(t==="trapezoid"){const off=w*0.18;x.moveTo(minX+off,minY);x.lineTo(maxX-off,minY);x.lineTo(maxX,maxY);x.lineTo(minX,maxY);x.closePath();}
+      else if(t==="diamond"){x.moveTo(minX+w/2,minY);x.lineTo(maxX,minY+h/2);x.lineTo(minX+w/2,maxY);x.lineTo(minX,minY+h/2);x.closePath();}
+      else if(t==="pentagon"){const cx=minX+w/2,cy=minY+h/2;for(let i=0;i<5;i++){const ang=-Math.PI/2+i*2*Math.PI/5;const px=cx+(w/2)*Math.cos(ang),py=cy+(h/2)*Math.sin(ang);if(i===0)x.moveTo(px,py);else x.lineTo(px,py);}x.closePath();}
+      else if(t==="hexagon"){const cx=minX+w/2,cy=minY+h/2;for(let i=0;i<6;i++){const ang=i*Math.PI/3;const px=cx+(w/2)*Math.cos(ang),py=cy+(h/2)*Math.sin(ang);if(i===0)x.moveTo(px,py);else x.lineTo(px,py);}x.closePath();}
+      else if(t==="axes"){const cx=minX+w/2,cy=minY+h/2;x.moveTo(minX,cy);x.lineTo(maxX,cy);x.moveTo(maxX-8,cy-4);x.lineTo(maxX,cy);x.lineTo(maxX-8,cy+4);x.moveTo(cx,maxY);x.lineTo(cx,minY);x.moveTo(cx-4,minY+8);x.lineTo(cx,minY);x.lineTo(cx+4,minY+8);}
+      x.stroke();
+      if(t==="axes"){x.fillStyle=clr;x.font="italic 14px 'STIX Two Text',serif";x.fillText("x",maxX-12,cy-4||(minY+h/2-4));x.fillText("y",minX+w/2+5,minY+10);x.fillText("O",minX+w/2-9,minY+h/2+12);}
     }else if(tool==="pen"){
       const lp=lastPt.current;const mx=(lp[0]+a)/2,my=(lp[1]+b)/2;
       x.quadraticCurveTo(lp[0],lp[1],mx,my);x.stroke();lastPt.current=[a,b];
@@ -838,7 +1029,15 @@ Backtick veya markdown KULLANMA.`;
       return;
     }
     if(drawing.current&&tool==="pen"&&pathPts.current.length>4&&snapshot.current){
-      restoreSnap();drawSmooth(ref.current.getContext("2d"),pathPts.current,clr,sz);
+      restoreSnap();
+      // Otomatik şekil tanıma açıksa, çizgiyi temiz versiyonuyla değiştir
+      if(autoSnap){
+        const recognized=recognizeStroke(pathPts.current);
+        if(recognized){drawRecognized(recognized);}
+        else{drawSmooth(ref.current.getContext("2d"),pathPts.current,clr,sz);}
+      }else{
+        drawSmooth(ref.current.getContext("2d"),pathPts.current,clr,sz);
+      }
     }
     drawing.current=false;snapshot.current=null;lastPt.current=null;
   };
@@ -865,7 +1064,7 @@ Backtick veya markdown KULLANMA.`;
     {label:"Araç",tools:[{id:"select",icon:"⊡",tip:"Seç ve taşı"},{id:"eraser",icon:"🧹",tip:"Silgi"}]},
     {label:"Çizim",tools:[{id:"pen",icon:"✏️",tip:"Serbest çizim (pürüzsüz)"},{id:"rawpen",icon:"🖊️",tip:"Ham kalem"},{id:"line",icon:"╱",tip:"Düz çizgi"},{id:"curve",icon:"⌢",tip:"Yay (eğri)"},{id:"dash",icon:"┄",tip:"Kesikli çizgi"}]},
     {label:"Ok",tools:[{id:"arrow",icon:"→",tip:"Ok"},{id:"dblarrow",icon:"⟷",tip:"Çift ok (ölçü)"}]},
-    {label:"Şekil",tools:[{id:"tri",icon:"△",tip:"Üçgen"},{id:"quad",icon:"◇",tip:"Dörtgen"},{id:"poly",icon:"⬠",tip:"Çokgen"},{id:"rect",icon:"▭",tip:"Dikdörtgen"},{id:"circle",icon:"○",tip:"Daire"}]},
+    {label:"Şekil",tools:[{id:"tri",icon:"△",tip:"Üçgen (3 nokta tıkla)"},{id:"quad",icon:"◇",tip:"Dörtgen (4 nokta tıkla)"},{id:"poly",icon:"⬠",tip:"Çokgen (n nokta tıkla)"},{id:"rect",icon:"▭",tip:"Dikdörtgen (sürükle)"},{id:"circle",icon:"○",tip:"Daire (sürükle)"},{id:"ellipse",icon:"⬭",tip:"Elips (sürükle)"},{id:"square",icon:"⬜",tip:"Kare (sürükle)"},{id:"rtri",icon:"◣",tip:"Dik üçgen (sürükle)"},{id:"par",icon:"▱",tip:"Paralelkenar (sürükle)"},{id:"trap",icon:"⏢",tip:"Yamuk (sürükle)"},{id:"dia",icon:"◇",tip:"Eşkenar dörtgen (sürükle)"},{id:"pent",icon:"⬠",tip:"Beşgen (sürükle)"},{id:"hex",icon:"⬡",tip:"Altıgen (sürükle)"},{id:"axes",icon:"➕",tip:"Koordinat düzlemi (sürükle)"}]},
     {label:"İşaret",tools:[{id:"arc",icon:"⌒",tip:"Açı yayı"},{id:"right",icon:"⊾",tip:"Dik açı"},{id:"parallel",icon:"∥",tip:"Paralel"},{id:"tick",icon:"╫",tip:"Eşit kenar"},{id:"dot",icon:"●",tip:"Nokta"},{id:"fill",icon:"🪣",tip:"Boya"}]},
     {label:"Metin",tools:[{id:"text",icon:"A",tip:"Metin"}]},
   ];
@@ -899,6 +1098,8 @@ Backtick veya markdown KULLANMA.`;
         <button className="ct" onClick={()=>drawGrid()} title="Koordinat düzlemi">📊</button>
         <label className="cb-chk"><input type="checkbox" checked={gridOpt.grid} onChange={e=>{const ng={...gridOpt,grid:e.target.checked};setGridOpt(ng);drawGrid(ng);}}/>Izgara</label>
         <label className="cb-chk"><input type="checkbox" checked={gridOpt.nums} onChange={e=>{const ng={...gridOpt,nums:e.target.checked};setGridOpt(ng);drawGrid(ng);}}/>Rakam</label>
+        <label className="cb-chk" title="Çizim noktaları en yakın 20px ızgara noktasına yapışsın"><input type="checkbox" checked={snapGrid} onChange={e=>setSnapGrid(e.target.checked)}/>🧲 Snap</label>
+        <label className="cb-chk" title="Serbest çizdiğiniz daire/üçgen/dikdörtgen otomatik temizlensin (API kullanmaz)"><input type="checkbox" checked={autoSnap} onChange={e=>setAutoSnap(e.target.checked)}/>✨ Otomatik</label>
       </div>
       <div className="cbs"/>
       <div className="cvb-g">
@@ -1710,7 +1911,7 @@ function EditorToolbar({pvRef,tpl}){
   );
 }
 
-function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,spacings,onUpdateSpacing,imgSizes,onUpdateImgSize,imgOffsets,onUpdateImgOffset,qImgs,onAddQImg,onUpdQImgSize,onUpdQImgOffset,onDelQImg,onAddToBank}){
+function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,spacings,onUpdateSpacing,imgSizes,onUpdateImgSize,imgOffsets,onUpdateImgOffset,imgCrops,onUpdateImgCrop,onResetImgCrop,qImgs,onAddQImg,onUpdQImgSize,onUpdQImgOffset,onDelQImg,onAddToBank}){
   const sn=startNum||1;
   const fs=qSize||11;
   const per=Math.ceil(qs.length/cols);
@@ -1732,7 +1933,7 @@ function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,
       }}>{cfg.watermark}</div>
     </div>}
     {tpl==="yaprak"&&cfg.showHeader!==false&&<><div className="Hbar"><div className="Hbl"><div className="Hbk HbkE" contentEditable suppressContentEditableWarning>{cfg.konu||"MATEMATİK"}</div><div className="Hba HbaE" contentEditable suppressContentEditableWarning>{cfg.alt||"Konu Testi"}</div></div><div className="Hbr"><div className="Hbt">TEST</div><div className="Hbn">{cfg.no||"01"}</div></div></div>{cfg.showInfo!==false&&<div className="Hinf HinfE" contentEditable suppressContentEditableWarning>Ad Soyad: ...............................................................     D: .........  Y: .........  B: .........</div>}</>}
-    {tpl==="sinav"&&cfg.showHeader!==false&&<><div className="Hhd HhdE" contentEditable suppressContentEditableWarning><div className="Hok">{cfg.okul||"………… OKULU"}</div><div className="Hbs">{cfg.baslik||"MATEMATİK YAZILI SINAVI"}</div></div><div className="Hsi HsiE" contentEditable suppressContentEditableWarning>Adı Soyadı: ..............................   Sınıf/No: ....../......   Süre: {cfg.sure||"40"} dk   Soru: {qs.length}</div></>}
+    {tpl==="sinav"&&cfg.showHeader!==false&&<><div className="Hhd HhdE" contentEditable suppressContentEditableWarning><div className="Hok">{cfg.okul||"………… OKULU"}</div><div className="Hbs">{cfg.baslik||((cfg.ders||"MATEMATİK").toUpperCase()+" YAZILI SINAVI")}</div></div><div className="Hsi HsiE" contentEditable suppressContentEditableWarning>Adı Soyadı: ..............................   Sınıf/No: ....../......   Süre: {cfg.sure||"40"} dk   Soru: {qs.length}</div></>}
     {tpl==="ders"&&<div className="Hdh"><div className="Hdu HduE" contentEditable suppressContentEditableWarning>{cfg.unite||"ÜNİTE 1"}</div><div className="Hdb HdbE" contentEditable suppressContentEditableWarning>{cfg.baslik||"ALIŞTIRMALAR"}</div><div className="Hdl"/></div>}
     {tpl==="duz"&&cfg.baslik&&<div className="Hzh HzhE" contentEditable suppressContentEditableWarning>{cfg.baslik}</div>}
     
@@ -1773,13 +1974,23 @@ function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,
         {ns!=="none"&&<div className={numCls}>{numText}</div>}
         <div className="QX">
           {(typeof q==='string'&&q.includes('<img '))?<div className="QIG">
-            <img src={(q.match(/src="([^"]+)"/)||[])[1]||""} className="QIM" style={{transform:`scale(${(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)/100}) translateX(${imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0}px)`,transformOrigin:'top left'}}/>
+            {(()=>{const cr=(imgCrops&&imgCrops[idx])||{top:0,right:0,bottom:0,left:0};
+              return <img src={(q.match(/src="([^"]+)"/)||[])[1]||""} className="QIM" style={{transform:`scale(${(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)/100}) translateX(${imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0}px)`,transformOrigin:'top left',clipPath:`inset(${cr.top}% ${cr.right}% ${cr.bottom}% ${cr.left}%)`,marginTop:cr.top?`-${cr.top}%`:0,marginBottom:cr.bottom?`-${cr.bottom}%`:0}}/>;
+            })()}
             {onUpdateImgSize&&<div className="QIS">
               <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>{const o=imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0;onUpdateImgOffset(idx,o-15);}}>◀</button>
               <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgSize(idx,Math.max(30,(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)-10))}>🔍−</button>
               <span className="QISt">{imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100}%</span>
               <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgSize(idx,Math.min(200,(imgSizes&&imgSizes[idx]!==undefined?imgSizes[idx]:100)+10))}>🔍+</button>
               <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>{const o=imgOffsets&&imgOffsets[idx]!==undefined?imgOffsets[idx]:0;onUpdateImgOffset(idx,o+15);}}>▶</button>
+            </div>}
+            {onUpdateImgCrop&&<div className="QIS QIS-crop" style={{top:32}} title="Resmi kenardan kırp">
+              <span className="QISt" style={{fontSize:9,marginRight:2}}>✂️</span>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgCrop(idx,'top',3)} title="Üstten kırp (+3%)">⬆</button>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgCrop(idx,'left',3)} title="Soldan kırp (+3%)">⬅</button>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgCrop(idx,'right',3)} title="Sağdan kırp (+3%)">➡</button>
+              <button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onUpdateImgCrop(idx,'bottom',3)} title="Alttan kırp (+3%)">⬇</button>
+              {imgCrops&&imgCrops[idx]&&<button className="QISb" onMouseDown={e=>e.preventDefault()} onClick={()=>onResetImgCrop(idx)} title="Kırpmayı sıfırla" style={{background:"#fee",color:"#c00"}}>↺</button>}
             </div>}
           </div>:
             <div className="QT QTE" contentEditable suppressContentEditableWarning
@@ -1798,7 +2009,7 @@ function Page({qs,tpl,cols,cfg,ff,r,onUpdateQ,pageNum,totalPages,startNum,qSize,
             </div>}
           </div>}
           <div className="QOA" contentEditable suppressContentEditableWarning data-ph="Seçenek eklemek için tıklayın: A) ... B) ... (yan yana veya alt alta)"/>
-          {tpl==="sinav"&&<div className="QLS"><div className="QL"/><div className="QL"/></div>}
+          {tpl==="sinav"&&cfg.cevapSatiri===true&&<div className="QLS"><div className="QL"/><div className="QL"/></div>}
           {onUpdateSpacing&&<div className="QSP">
             {onAddToBank&&<button className="QSPb q-imgbtn" onMouseDown={e=>e.preventDefault()} onClick={()=>onAddToBank(idx)} title="Bu soruyu bankaya ekle" style={{background:"#fff3e0",borderColor:"#ffb74d"}}>🗂️+</button>}
             {onAddQImg&&!(qImgs&&qImgs[idx])&&<button className="QSPb q-imgbtn" onMouseDown={e=>e.preventDefault()} onClick={()=>onAddQImg(idx)} title="Bu soruya resim ekle" style={{background:"#e3f2fd",borderColor:"#90caf9"}}>📷+</button>}
@@ -1828,13 +2039,20 @@ function Sec({n,title,icon,children,openSec,setOpenSec,highlight}){
 function App(){
   const[font,setFont]=useState("stix");
   const[tpl,setTpl]=useState("yaprak");const[cols,setCols]=useState(2);
-  const[cfg,setCfg]=useState({konu:"MATEMATİK",alt:"Konu Testi",no:"01",opt:5,okul:"",baslik:"",sure:"40",unite:"ÜNİTE 1",sayfaNo:"",numStyle:"circle",showInfo:true,showCevap:true,divText:""});
+  const[cfg,setCfg]=useState({konu:"MATEMATİK",alt:"Konu Testi",no:"01",opt:5,okul:"",baslik:"",sure:"40",unite:"ÜNİTE 1",sayfaNo:"",numStyle:"circle",showInfo:true,showCevap:true,divText:"",ders:"Matematik"});
   const uc=(k,v)=>setCfg(c=>({...c,[k]:v}));
   const[qs,setQs]=useState([]);const[show,setShow]=useState(false);
   const[busy,setBusy]=useState(false);const[err,setErr]=useState("");
   const[cleaning,setCleaning]=useState(false);
   const[qSize,setQSize]=useState(11);const[perPage,setPerPage]=useState(10);
   const[spacings,setSpacings]=useState({});const[imgSizes,setImgSizes]=useState({});const[imgOffsets,setImgOffsets]=useState({});
+  const[imgCrops,setImgCrops]=useState({}); // {idx: {top, right, bottom, left}} — yüzde
+  const updImgCrop=(idx,side,delta)=>setImgCrops(p=>{
+    const cur=p[idx]||{top:0,right:0,bottom:0,left:0};
+    const next={...cur,[side]:Math.max(0,Math.min(40,cur[side]+delta))};
+    return{...p,[idx]:next};
+  });
+  const resetImgCrop=(idx)=>setImgCrops(p=>{const n={...p};delete n[idx];return n;});
   const[qImgs,setQImgs]=useState({}); // {idx: {src, size:100, offset:0}}
   const qImgFileRef=useRef();const qImgIdxRef=useRef(null);
   const addQImg=(i)=>{qImgIdxRef.current=i;qImgFileRef.current?.click();};
@@ -1855,7 +2073,98 @@ function App(){
   const[openSec,setOpenSec]=useState(1);
   const[drawMode,setDrawMode]=useState(false);
   const[uploadMode,setUploadMode]=useState(false);
-  const[uploadSub,setUploadSub]=useState(""); // "" = yöntem seçilmedi, sonra "draw"/"cam"/"file"/"txt"
+  const[uploadSub,setUploadSub]=useState(""); // "" = yöntem seçilmedi, sonra "draw"/"cam"/"file"/"txt"/"pdf"
+  // === PDF KIRPMA STATE ===
+  const[pdfDoc,setPdfDoc]=useState(null);
+  const[pdfPage,setPdfPage]=useState(1);
+  const[pdfTotalPages,setPdfTotalPages]=useState(0);
+  const[pdfFileName,setPdfFileName]=useState("");
+  const[pdfBusy,setPdfBusy]=useState(false);
+  const[pdfCropRect,setPdfCropRect]=useState(null); // {x,y,w,h} canvas pikselinde
+  const pdfCanvasRef=useRef();
+  const pdfDragRef=useRef({down:false,start:null});
+  // PDF dosyasını yükle
+  const onPdfFile=async(e)=>{
+    const f=e.target.files?.[0];if(!f)return;
+    e.target.value='';
+    if(!window.pdfjsLib){alert("PDF kütüphanesi henüz yüklendi/yüklenmiyor. Birkaç saniye bekleyip tekrar deneyin.");return;}
+    // Worker'ın tanımlı olduğundan emin ol (sayfa cache'lenmişse veya init kaçmışsa)
+    if(window.pdfjsLib.GlobalWorkerOptions&&!window.pdfjsLib.GlobalWorkerOptions.workerSrc){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    setPdfBusy(true);
+    try{
+      const ab=await f.arrayBuffer();
+      const doc=await window.pdfjsLib.getDocument({data:ab}).promise;
+      setPdfDoc(doc);
+      setPdfTotalPages(doc.numPages);
+      setPdfPage(1);
+      setPdfFileName(f.name);
+      setPdfCropRect(null);
+    }catch(ex){
+      alert("PDF açılamadı: "+ex.message);
+    }
+    setPdfBusy(false);
+  };
+  // Sayfayı canvas'a çiz
+  const renderPdfPage=async(num)=>{
+    if(!pdfDoc||!pdfCanvasRef.current)return;
+    setPdfBusy(true);
+    try{
+      const page=await pdfDoc.getPage(num);
+      const viewport=page.getViewport({scale:1.5});
+      const c=pdfCanvasRef.current;
+      c.width=viewport.width;c.height=viewport.height;
+      const ctx=c.getContext("2d");
+      await page.render({canvasContext:ctx,viewport}).promise;
+      setPdfCropRect(null);
+    }catch(ex){console.error(ex);}
+    setPdfBusy(false);
+  };
+  useEffect(()=>{if(pdfDoc)renderPdfPage(pdfPage);},[pdfDoc,pdfPage]);
+  // Kırpma: fare ile dikdörtgen seç
+  const onPdfMouseDown=(e)=>{
+    const r=pdfCanvasRef.current.getBoundingClientRect();
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    pdfDragRef.current={down:true,start:{x,y}};
+    setPdfCropRect({x,y,w:0,h:0});
+  };
+  const onPdfMouseMove=(e)=>{
+    if(!pdfDragRef.current.down)return;
+    const r=pdfCanvasRef.current.getBoundingClientRect();
+    const x=e.clientX-r.left,y=e.clientY-r.top;
+    const s=pdfDragRef.current.start;
+    setPdfCropRect({x:Math.min(s.x,x),y:Math.min(s.y,y),w:Math.abs(x-s.x),h:Math.abs(y-s.y)});
+  };
+  const onPdfMouseUp=()=>{pdfDragRef.current.down=false;};
+  // Touch desteği
+  const onPdfTouchStart=(e)=>{e.preventDefault();const t=e.touches[0];onPdfMouseDown(t);};
+  const onPdfTouchMove=(e)=>{e.preventDefault();const t=e.touches[0];onPdfMouseMove(t);};
+  const onPdfTouchEnd=(e)=>{e.preventDefault();onPdfMouseUp();};
+  // Seçilen alanı kırp ve sayfaya ekle
+  const cropAndAddPdf=()=>{
+    if(!pdfCropRect||pdfCropRect.w<10||pdfCropRect.h<10){alert("Önce farkenin ile bir alan seçin (sürükleyerek çizin).");return;}
+    const src=pdfCanvasRef.current;
+    const rect=src.getBoundingClientRect();
+    const sx=src.width/rect.width;
+    const sy=src.height/rect.height;
+    const cx=Math.round(pdfCropRect.x*sx);
+    const cy=Math.round(pdfCropRect.y*sy);
+    const cw=Math.round(pdfCropRect.w*sx);
+    const ch=Math.round(pdfCropRect.h*sy);
+    const out=document.createElement("canvas");
+    out.width=cw;out.height=ch;
+    out.getContext("2d").drawImage(src,cx,cy,cw,ch,0,0,cw,ch);
+    const dataUrl=out.toDataURL("image/png");
+    saveHistory();
+    setQs(p=>[...p,'<img src="'+dataUrl+'" style="max-width:100%;height:auto"/>']);
+    setShow(true);
+    setPdfCropRect(null);
+    setUploadSub(""); // 4 yöntem ekranına dön
+  };
+  const closePdf=()=>{setPdfDoc(null);setPdfPage(1);setPdfTotalPages(0);setPdfFileName("");setPdfCropRect(null);};
+  // AI Test Üret özelliği kaldırıldı (şekilli sorular üretemiyor, gereksiz oldu)
+  // generateAITest fonksiyonu kaldırıldı — şekilli sorular üretemediği için kullanışsızdı
   // Soru Ekle bölümü her açıldığında 4 yöntem ekranına dön
   const wasOpenRef=useRef(false);
   useEffect(()=>{
@@ -2048,6 +2357,8 @@ function App(){
     return true;
   });
 
+  // Çıkmış Sorular Arşivi geri çekildi — API limit pratik problem yaratıyordu, Soru Bankası odaklı plan.
+
   const saveHistory=()=>setHistory(p=>[...p.slice(-20),JSON.stringify(qs)]);
   const undo=()=>{if(!history.length)return;const prev=JSON.parse(history[history.length-1]);setQs(prev);setHistory(p=>p.slice(0,-1));if(prev.length)setShow(true);};
   const delQ=(i)=>{saveHistory();const n=[...qs];n.splice(i,1);setQs(n);if(!n.length)setShow(false);};
@@ -2055,25 +2366,67 @@ function App(){
   const[dragIdx,setDragIdx]=useState(null);const[overIdx,setOverIdx]=useState(null);
   const handleDrop=(toIdx)=>{if(dragIdx===null||dragIdx===toIdx)return;saveHistory();const n=[...qs];const item=n.splice(dragIdx,1)[0];n.splice(toIdx,0,item);setQs(n);setDragIdx(null);setOverIdx(null);};
 
+  // Derse göre AI talimatına ek hints ekleyen helper
+  const dpr=(basePrompt)=>{
+    const hint=DERS_HINTS[cfg.ders]||"";
+    const dersTag=cfg.ders&&cfg.ders!=="Genel"?`\nAKTİF DERS: ${cfg.ders}\n`:"";
+    return basePrompt+dersTag+(hint?"\n"+hint+"\n":"");
+  };
   const scan=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
     try{for(const file of files){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
       const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
-      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:dpr(PROMPT_SCAN)}]);
       const j=parseJ(raw);if(j.questions?.length){saveHistory();setQs(p=>[...p,...j.questions]);setShow(true);}
     }}catch(ex){setErr(ex.message==="Failed to fetch"?"Bağlantı kurulamadı.":ex.message);}setBusy(false);};
   const scanBook=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setBusy(true);setErr("");
     try{for(const file of files){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file)});
       const b=du.split(",")[1],m=du.match(/^data:(image\/\w+);/)?.[1]||"image/jpeg";
-      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_BOOK}]);
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:dpr(PROMPT_BOOK)}]);
       const j=parseJ(raw);if(j.questions?.length){saveHistory();setQs(p=>[...p,...j.questions]);setShow(true);}
     }}catch(ex){setErr(ex.message==="Failed to fetch"?"Bağlantı kurulamadı.":ex.message);}setBusy(false);};
   const scanImg=async(e)=>{const files=Array.from(e.target.files).filter(f=>f.type.startsWith("image/"));e.target.value="";if(!files.length)return;setCleaning(true);
     for(const file of files){try{const cleaned=await cleanImage(file);saveHistory();setQs(p=>[...p,'<img src="'+cleaned+'" style="max-width:100%;height:auto"/>']);setShow(true);}catch(err){const du=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(file);});saveHistory();setQs(p=>[...p,'<img src="'+du+'" style="max-width:100%;height:auto"/>']);setShow(true);}}setCleaning(false);};
-  const reconvert=async(i)=>{setConverting(i);try{const raw=await callAI([{type:"text",text:PROMPT_SCAN+"\n\nBu soruyu düzelt ve yeniden çevir:\n"+qs[i]}]);const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}catch(e){}setConverting(null);};
-  const convertImgToText=async(i)=>{const q=qs[i];if(!q||!q.includes('<img'))return;setConverting(i);try{const src=q.match(/src="([^"]+)"/)?.[1];if(src){const b=src.split(",")[1],m=src.match(/^data:(image\/\w+);/)?.[1]||"image/png";const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_SCAN}]);const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}}catch(e){}setConverting(null);};
+  const reconvert=async(i)=>{setConverting(i);try{const raw=await callAI([{type:"text",text:dpr(PROMPT_SCAN)+"\n\nBu soruyu düzelt ve yeniden çevir:\n"+qs[i]}]);const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}catch(e){}setConverting(null);};
+  const convertImgToText=async(i)=>{const q=qs[i];if(!q||!q.includes('<img'))return;setConverting(i);try{const src=q.match(/src="([^"]+)"/)?.[1];if(src){const b=src.split(",")[1],m=src.match(/^data:(image\/\w+);/)?.[1]||"image/png";const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:dpr(PROMPT_SCAN)}]);const j=parseJ(raw);if(j.questions?.length){saveHistory();const n=[...qs];n[i]=j.questions[0];setQs(n);}}}catch(e){}setConverting(null);};
   const addTxt=()=>{const ls=txt.split("\n").map(l=>l.trim()).filter(Boolean);if(ls.length){saveHistory();setQs(p=>[...p,...ls]);setTxt("");setShow(true);}};
   const addFromCanvas=(dataUrl)=>{saveHistory();setQs(p=>[...p,'<img src="'+dataUrl+'" style="max-width:100%;height:auto"/>']);setShow(true);setDrawMode(false);};
-  const recognizeFromCanvas=async(dataUrl)=>{setBusy(true);setErr("");try{const b=dataUrl.split(",")[1],m=dataUrl.match(/^data:(image\/\w+);/)?.[1]||"image/png";const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:PROMPT_FORMULA}]);const j=parseJ(raw);if(j.results?.length){saveHistory();setQs(p=>[...p,...j.results.map(r=>r.text)]);setShow(true);setDrawMode(false);}else setErr("Tanınamadı.");}catch(e){setErr(e.message==="Failed to fetch"?"Bağlantı kurulamadı.":e.message);}setBusy(false);};
+  const recognizeFromCanvas=async(dataUrl)=>{
+    setBusy(true);setErr("");
+    try{
+      const b=dataUrl.split(",")[1];
+      const m=dataUrl.match(/^data:(image\/\w+);/)?.[1]||"image/png";
+      const raw=await callAI([{type:"image",source:{type:"base64",media_type:m,data:b}},{type:"text",text:dpr(PROMPT_FORMULA)}]);
+      const j=parseJ(raw);
+      // Birden fazla yanıt formatını destekle
+      let texts=[];
+      if(j.results&&Array.isArray(j.results)&&j.results.length){
+        texts=j.results.map(r=>typeof r==="string"?r:(r.text||r.html||r.content||""));
+      }else if(j.questions&&Array.isArray(j.questions)&&j.questions.length){
+        texts=j.questions;
+      }else if(j.text){
+        texts=[j.text];
+      }else if(j.html){
+        texts=[j.html];
+      }else if(typeof raw==="string"&&raw.trim().length>0&&!raw.includes("{")){
+        // AI ham metin verdi (JSON değil)
+        texts=[raw.trim()];
+      }
+      texts=texts.filter(t=>t&&t.trim());
+      if(texts.length){
+        saveHistory();
+        setQs(p=>[...p,...texts]);
+        setShow(true);
+        setDrawMode(false);
+      }else{
+        setErr("Tanınamadı. Çizimi daha büyük yapın veya temizleyip tekrar deneyin.");
+      }
+    }catch(e){
+      setErr(e.message==="Failed to fetch"?"Bağlantı kurulamadı.":e.message);
+    }
+    setBusy(false);
+  };
+
+  // SINAV_PRESETS kaldırıldı — yaprak testten farkı olmadığı için sadeleştirildi
 
   const printHtml=(title)=>`<!DOCTYPE html><html><head><title>${title||"MathStudio"}</title><link href="${GF}" rel="stylesheet"><style>@page{size:A4;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{margin:0}.pw-break{display:none}.pw-page{page-break-after:always}.pw-page:last-child{page-break-after:auto}.QTE,.QOA{background:none!important;box-shadow:none!important;border:none!important}.QOA:empty{display:none}.QSP,.QIS,.etb,.etb *,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,[contenteditable]{outline:none!important;box-shadow:none!important}.QSP,.QIS,.etb,.QOA-tools,.q-tools,.pw-tools,.q-del,.q-edit,.q-imgbtn,.QXIC{display:none!important}.QTE,.QTE:hover,.QTE:focus,.QOA,.QOA:hover,.QOA:focus{background:transparent!important;box-shadow:none!important;outline:none!important}.QOA:empty,.QOA:empty::before{display:none!important;content:none!important}.HbkE,.HbaE,.HinfE,.HduE,.HdbE,.HzhE,.HsiE,.HhdE{box-shadow:none!important;outline:none!important}body,html,.A4{background:#fff!important}${CMU_FONT_FACE}${a4css(ff)}${mathCSS()}</style></head><body>${pvRef.current?.outerHTML||""}</body></html>`;
   const print=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(printHtml(cfg.konu));w.document.close();setTimeout(()=>w.print(),500);};
@@ -2196,6 +2549,11 @@ function App(){
                 <span className="add-tt">Metin Yaz</span>
                 <span className="add-ds">Klavyeden yaz</span>
               </button>
+              <button className="add-card add-card-pdf" onClick={()=>setUploadSub("pdf")} style={{gridColumn:"span 2"}}>
+                <span className="add-ic">📄</span>
+                <span className="add-tt">PDF'den Kırp</span>
+                <span className="add-ds">PDF sayfasından şekil/soru kırp ekle</span>
+              </button>
             </div>
           </>}
           {/* AŞAMA 2: Yöntem seçildikten sonra ilgili eylemler.
@@ -2244,6 +2602,51 @@ function App(){
               <textarea className="p-ta" value={txt} onChange={e=>setTxt(e.target.value)} rows={5} placeholder="Soruyu buraya yazın..." style={{width:"100%",minHeight:120,fontSize:14,padding:10}}/>
               <button className="bo" onClick={()=>{addTxt();setUploadSub("");}} disabled={!txt.trim()} style={{width:"100%",marginTop:8,background:"#1b2a4a",color:"#fff",borderColor:"#1b2a4a",fontSize:14,padding:"10px"}}>Sayfaya Ekle</button>
             </div>}
+            {uploadSub==="pdf"&&<div>
+              <div className="add-stage-tt" style={{background:"linear-gradient(135deg,#fff3e0,#ffe0b2)",color:"#e65100"}}>📄 PDF'den şekil/soru kırp</div>
+              {!pdfDoc&&<div>
+                <label className="add-act-btn add-act-text" style={{cursor:"pointer"}}>
+                  <span className="add-act-ic">📁</span>
+                  <span className="add-act-info"><b>PDF Dosyası Seç</b><small>Bilgisayardan/galeriden bir PDF açın, sayfasından bölge kırpacaksınız</small></span>
+                  <input type="file" accept="application/pdf" hidden onChange={onPdfFile}/>
+                </label>
+                <div style={{padding:"10px",background:"#fffde7",border:"1px solid #ffd54f",borderRadius:6,marginTop:10,fontSize:11,color:"#854d0e",lineHeight:1.5}}>
+                  💡 <b>Önerilen ücretsiz kaynaklar (telifsiz):</b><br/>
+                  • <b>OpenStax Physics</b>: openstax.org/details/books/physics<br/>
+                  • <b>PhET Simulasyonları</b>: phet.colorado.edu<br/>
+                  • <b>EBA materyalleri</b>: eba.gov.tr<br/>
+                  <br/>
+                  <i>Yüklediğiniz PDF'in kullanım hakları size aittir; uygulama PDF'i sunucuya göndermez, sadece tarayıcınızda görüntüler.</i>
+                </div>
+              </div>}
+              {pdfDoc&&<div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap",fontSize:11}}>
+                  <span style={{flex:1,fontWeight:600,color:"#1b2a4a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📄 {pdfFileName}</span>
+                  <button className="p-sb" onClick={closePdf} style={{background:"#fee",color:"#c00",borderColor:"#fcc"}}>✕ Kapat</button>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,justifyContent:"center"}}>
+                  <button className="p-sb" disabled={pdfPage<=1||pdfBusy} onClick={()=>setPdfPage(p=>Math.max(1,p-1))}>◀ Önceki</button>
+                  <input type="number" min="1" max={pdfTotalPages} value={pdfPage} onChange={e=>setPdfPage(Math.max(1,Math.min(pdfTotalPages,+e.target.value||1)))} style={{width:60,padding:"4px 6px",border:"1.5px solid #d8dce6",borderRadius:5,fontSize:12,textAlign:"center"}}/>
+                  <span style={{fontSize:11,color:"#666"}}>/ {pdfTotalPages}</span>
+                  <button className="p-sb" disabled={pdfPage>=pdfTotalPages||pdfBusy} onClick={()=>setPdfPage(p=>Math.min(pdfTotalPages,p+1))}>Sonraki ▶</button>
+                </div>
+                {pdfBusy&&<div className="ld" style={{margin:"6px 0"}}><div className="lds"/>Sayfa hazırlanıyor...</div>}
+                <div style={{padding:8,background:"#fff8e1",border:"1px dashed #ffd54f",borderRadius:6,marginBottom:8,fontSize:11,color:"#5d4037",textAlign:"center"}}>
+                  ✂️ Kırpmak istediğiniz alanı <b>fareyle/parmakla sürükleyerek</b> seçin
+                </div>
+                <div style={{position:"relative",overflow:"auto",maxHeight:500,border:"1.5px solid #d8dce6",borderRadius:6,background:"#fafafa"}}>
+                  <canvas ref={pdfCanvasRef}
+                    onMouseDown={onPdfMouseDown} onMouseMove={onPdfMouseMove} onMouseUp={onPdfMouseUp} onMouseLeave={onPdfMouseUp}
+                    onTouchStart={onPdfTouchStart} onTouchMove={onPdfTouchMove} onTouchEnd={onPdfTouchEnd}
+                    style={{display:"block",cursor:"crosshair",maxWidth:"100%",height:"auto",touchAction:"none"}}/>
+                  {pdfCropRect&&<div style={{position:"absolute",left:pdfCropRect.x,top:pdfCropRect.y,width:pdfCropRect.w,height:pdfCropRect.h,border:"2px dashed #2563eb",background:"rgba(37,99,235,0.12)",pointerEvents:"none"}}/>}
+                </div>
+                <div style={{display:"flex",gap:6,marginTop:10}}>
+                  <button className="bo" onClick={cropAndAddPdf} disabled={!pdfCropRect||pdfCropRect.w<10} style={{flex:1,background:"#16a34a",color:"#fff",borderColor:"#15803d",fontSize:14,padding:"10px",fontWeight:600}}>✂️ Seçili Alanı Soruya Ekle</button>
+                  {pdfCropRect&&<button className="bo" onClick={()=>setPdfCropRect(null)}>↺ Seçimi Sil</button>}
+                </div>
+              </div>}
+            </div>}
           </>}
         </Sec>
         <Sec openSec={openSec} setOpenSec={setOpenSec} n={2} title="Döküman Şablonu" icon="📋">
@@ -2254,6 +2657,14 @@ function App(){
           </div>
         </Sec>
         <Sec openSec={openSec} setOpenSec={setOpenSec} n={3} title="Döküman Bilgileri" icon="📝">
+          {/* DERS SEÇİCİ — tüm şablonlarda görünür, AI çevrim için kullanılır */}
+          <div className="p-row" style={{padding:"8px",background:"#f0f9ff",border:"1px solid #7dd3fc",borderRadius:6,marginBottom:10}}>
+            <span className="p-lbl" style={{color:"#075985",fontWeight:700}}>📚 Ders</span>
+            <select className="p-sel" value={cfg.ders||"Matematik"} onChange={e=>uc("ders",e.target.value)} style={{flex:1,fontWeight:600}}>
+              {DERS_LIST.map(d=><option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          {/* Sınav türü preset seçici kaldırıldı — yaprak testten farkı olmadığı için */}
           {tpl==="yaprak"&&<div className="p-form">
             <input placeholder="Konu (MATEMATİK)" value={cfg.konu} onChange={e=>uc("konu",e.target.value)}/>
             <input placeholder="Alt başlık (Konu Testi)" value={cfg.alt} onChange={e=>uc("alt",e.target.value)}/>
@@ -2263,7 +2674,9 @@ function App(){
             <label className="p-chk"><input type="checkbox" checked={cfg.showCevap!==false} onChange={e=>uc("showCevap",e.target.checked)}/> Cevap Anahtarı</label>
           </div>}
           {tpl==="sinav"&&<div className="p-form"><input placeholder="Okul Adı" value={cfg.okul} onChange={e=>uc("okul",e.target.value)}/><input placeholder="Sınav Başlığı" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Süre (dk)" value={cfg.sure} onChange={e=>uc("sure",e.target.value)} className="sm"/>
+            <div className="p-row"><span className="p-lbl">Şık Sayısı</span><div className="p-btns">{[3,4,5].map(n=><button key={n} className={`p-sb${(cfg.opt||5)===n?" p-on":""}`} onClick={()=>uc("opt",n)}>{n}</button>)}</div></div>
             <label className="p-chk" style={{background:"#fff8e1",padding:"6px 8px",borderRadius:6,border:"1px solid #ffd54f"}}><input type="checkbox" checked={cfg.showHeader!==false} onChange={e=>uc("showHeader",e.target.checked)}/> <b>Üst başlığı göster</b> (arka sayfa için kapatın)</label>
+            <label className="p-chk"><input type="checkbox" checked={cfg.cevapSatiri===true} onChange={e=>uc("cevapSatiri",e.target.checked)}/> Soruların altına cevap satırı ekle (klasik açık uçlu sınav için)</label>
           </div>}
           {(tpl==="konu"||tpl==="kitap")&&<div className="p-form"><input placeholder="Ünite" value={cfg.unite} onChange={e=>uc("unite",e.target.value)}/><input placeholder="Başlık" value={cfg.baslik} onChange={e=>uc("baslik",e.target.value)}/><input placeholder="Sayfa No" value={cfg.sayfaNo||""} onChange={e=>uc("sayfaNo",e.target.value)} className="sm"/></div>}
         </Sec>
@@ -2400,6 +2813,7 @@ function App(){
           </div>
         </div>}
         {/* Eski Soru Ekle bölümü kaldırıldı — yeni vurgulu versiyon yukarıda n={1} */}
+        {/* Çıkmış Sorular Arşivim bölümü kaldırıldı — Soru Bankası'na odaklandık. AI özellikleri ileride bankaya entegre edilecek. */}
         {qs.length>0&&<div className="p-qs">
           <div className="p-qh">📋 {qs.length} Soru <button className="p-qcl" onClick={()=>{saveHistory();setQs([]);setShow(false);}}>Tümünü Sil</button>{history.length>0&&<button className="p-qu" onClick={undo}>↩</button>}</div>
           <div className="p-ql">{qs.map((q,i)=><QItem key={`q${i}`} index={i} html={q} onUpdate={(val)=>{const n=[...qs];n[i]=val;setQs(n);}} onDelete={()=>delQ(i)} onCopy={()=>copyQ(i)}
@@ -2414,7 +2828,7 @@ function App(){
           {Array.from({length:Math.ceil(qs.length/perPage)}).map((_,pi)=>{
             const pageQs=qs.slice(pi*perPage,(pi+1)*perPage);
             const tp=Math.ceil(qs.length/perPage);
-            return <div key={pi} className="pw-page">{pi>0&&<div className="pw-break"/>}<Page qs={pageQs} tpl={tpl} cols={cols} cfg={cfg} ff={ff} pageNum={pi+1} totalPages={tp} startNum={pi*perPage+1} qSize={qSize} spacings={spacings} imgSizes={imgSizes} imgOffsets={imgOffsets} qImgs={qImgs} onAddQImg={(idx)=>{const ri=pi*perPage+idx;addQImg(ri);}} onUpdQImgSize={(idx,v)=>{const ri=pi*perPage+idx;updQImgSize(ri,v);}} onUpdQImgOffset={(idx,v)=>{const ri=pi*perPage+idx;updQImgOffset(ri,v);}} onDelQImg={(idx)=>{const ri=pi*perPage+idx;delQImg(ri);}} onAddToBank={(idx)=>{const ri=pi*perPage+idx;addToBank(ri);}} onUpdateImgSize={(idx,val)=>{const ri=pi*perPage+idx;setImgSizes(s=>({...s,[ri]:val}));}} onUpdateImgOffset={(idx,val)=>{const ri=pi*perPage+idx;setImgOffsets(s=>({...s,[ri]:val}));}} onUpdateSpacing={(idx,val)=>{const ri=pi*perPage+idx;setSpacings(s=>({...s,[ri]:val}));}} onUpdateQ={(idx,html)=>{const ri=pi*perPage+idx;const n=[...qs];n[ri]=html;setQs(n);}}/></div>;
+            return <div key={pi} className="pw-page">{pi>0&&<div className="pw-break"/>}<Page qs={pageQs} tpl={tpl} cols={cols} cfg={cfg} ff={ff} pageNum={pi+1} totalPages={tp} startNum={pi*perPage+1} qSize={qSize} spacings={spacings} imgSizes={imgSizes} imgOffsets={imgOffsets} imgCrops={imgCrops} qImgs={qImgs} onAddQImg={(idx)=>{const ri=pi*perPage+idx;addQImg(ri);}} onUpdQImgSize={(idx,v)=>{const ri=pi*perPage+idx;updQImgSize(ri,v);}} onUpdQImgOffset={(idx,v)=>{const ri=pi*perPage+idx;updQImgOffset(ri,v);}} onDelQImg={(idx)=>{const ri=pi*perPage+idx;delQImg(ri);}} onAddToBank={(idx)=>{const ri=pi*perPage+idx;addToBank(ri);}} onUpdateImgSize={(idx,val)=>{const ri=pi*perPage+idx;setImgSizes(s=>({...s,[ri]:val}));}} onUpdateImgOffset={(idx,val)=>{const ri=pi*perPage+idx;setImgOffsets(s=>({...s,[ri]:val}));}} onUpdateImgCrop={(idx,side,delta)=>{const ri=pi*perPage+idx;updImgCrop(ri,side,delta);}} onResetImgCrop={(idx)=>{const ri=pi*perPage+idx;resetImgCrop(ri);}} onUpdateSpacing={(idx,val)=>{const ri=pi*perPage+idx;setSpacings(s=>({...s,[ri]:val}));}} onUpdateQ={(idx,html)=>{const ri=pi*perPage+idx;const n=[...qs];n[ri]=html;setQs(n);}}/></div>;
           })}
         </div>}
       </div>
@@ -2426,10 +2840,10 @@ function App(){
 /* ═══ MATH CSS — kesir çizgili, limit altında, integral sınırlı ═══ */
 function mathCSS(){return`
 .mf{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin:0 3px;line-height:1.1}
-.mfn{padding:2px 6px 3px;border-bottom:1.8px solid #222;text-align:center;font-size:.88em;min-width:12px}
-.mfd{padding:3px 6px 2px;text-align:center;font-size:.88em;min-width:12px}
+.mfn{padding:1px 6px 2px;border-bottom:1px solid #222;text-align:center;font-size:.88em;min-width:12px;line-height:1.25}
+.mfd{padding:2px 6px 1px;text-align:center;font-size:.88em;min-width:12px;line-height:1.25}
 .mf .mf{margin:0 1px}.mf .mf .mfn,.mf .mf .mfd{font-size:.82em;padding:1px 3px}
-.mf .mf .mfn{border-bottom-width:1.2px}
+.mf .mf .mfn{border-bottom-width:0.8px}
 .ml{display:inline-flex;flex-direction:column;align-items:center;vertical-align:baseline;margin:0 2px 0 5px;line-height:1;position:relative;top:0.15em}
 .mlt{font-size:1em;font-style:normal;font-weight:400}
 .mlb{font-size:.62em;color:#333;line-height:1;margin-top:1px;white-space:nowrap}
@@ -2441,15 +2855,20 @@ function mathCSS(){return`
 .msu{font-size:.55em;line-height:1}
 .mss{font-size:1.5em;line-height:.78;font-family:'STIX Two Text','Times New Roman',serif}
 .msl{font-size:.55em;line-height:1}
+/* === KÖK İFADESİ — orijinal basit yapı === */
 .mr{display:inline-flex;align-items:stretch;vertical-align:middle}
 .mrs{font-size:1.2em;line-height:1;font-family:'STIX Two Text','Times New Roman',serif}
 .mrc{border-top:1.5px solid #222;padding:2px 4px 0;display:inline-flex;align-items:center}
+.mr>sup{font-size:0.6em;vertical-align:0.7em;margin-right:-0.4em;color:#222;font-weight:500}
 sup{font-size:.7em;vertical-align:super;line-height:0}
 sub{font-size:.7em;vertical-align:sub;line-height:0}
-.mp{display:inline-flex;align-items:center;vertical-align:middle;margin:4px 2px}
-.mpb{font-family:'STIX Two Text','Times New Roman',serif;font-weight:200;color:#222;line-height:0.9;display:inline-flex;align-items:center;justify-content:center;margin-right:4px;flex-shrink:0}
-.mpc{display:inline-flex;flex-direction:column;gap:1px;padding:5px 0;justify-content:center}
-.mpl{display:block;line-height:1.85;white-space:nowrap;padding:2px 3px}
+.mp{display:inline-flex;align-items:center;vertical-align:middle;margin:4px 2px;white-space:normal}
+.mpb{font-family:'STIX Two Math','STIX Two Text','Cambria Math','Times New Roman',serif;font-weight:300;color:#222;line-height:0.85;display:inline-flex;align-items:center;justify-content:center;margin-right:6px;flex-shrink:0;font-size:1.4em;align-self:stretch;transform:scaleY(2);transform-origin:center;padding:0 2px}
+.mpc{display:inline-flex;flex-direction:column;gap:2px;padding:4px 0;justify-content:center;align-items:flex-start}
+.mpl{display:block;line-height:1.6;white-space:nowrap;padding:1px 2px}
+/* Parçalı fonksiyon — AI'nın hatalı parçalanmış çıktısı için fallback */
+.mp p,.mp div,.mp br{display:inline!important}
+.mp{break-inside:avoid;page-break-inside:avoid}
 .mmx{display:inline-flex;align-items:center;vertical-align:middle;margin:0 3px}
 .mmxb{font-family:'STIX Two Text','Times New Roman',serif;font-weight:200;color:#222;line-height:0.9;display:inline-flex;align-items:center;flex-shrink:0;padding:0 2px}
 .mmxg{display:inline-flex;flex-direction:column;gap:2px;padding:4px 0}
@@ -2682,6 +3101,11 @@ function uicss(){return`
 .add-card-file:hover{border-color:#7c3aed;background:linear-gradient(135deg,#ede9fe,#ddd6fe)}
 .add-card-txt{border-color:#fcd34d;background:linear-gradient(135deg,#fffbeb,#fef3c7)}
 .add-card-txt:hover{border-color:#d97706;background:linear-gradient(135deg,#fef3c7,#fde68a)}
+/* AI Test Üret CSS sınıfları kaldırıldı */
+.add-card-pdf{border-color:#fb923c;background:linear-gradient(135deg,#fff7ed,#ffedd5)}
+.add-card-pdf:hover{border-color:#ea580c;background:linear-gradient(135deg,#ffedd5,#fed7aa);transform:translateY(-2px)}
+.add-card-pdf .add-tt{color:#9a3412}
+.add-card-pdf .add-ds{color:#c2410c}
 .add-back{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#f5f6fa;border:1px solid #d8dce6;border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;color:#555;font-weight:600;margin-bottom:10px;transition:all .15s}
 .add-back:hover{background:#e8eaef;color:#1b2a4a}
 .add-stage-tt{font-size:13px;font-weight:600;color:#1b2a4a;margin-bottom:10px;padding:8px 10px;background:#f0f3ff;border-radius:6px}
